@@ -5,13 +5,41 @@ import { Mic, MicOff, Pause, Play, Square, Loader2, Monitor, AppWindow } from "l
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDuration } from "@/lib/utils";
 import type { RecordingState } from "@/types";
 import { cn } from "@/lib/utils";
 
+type SpeechRecognitionResultList = {
+  length: number;
+  [i: number]: { 0: { transcript: string }; isFinal: boolean };
+};
+
+type SpeechResultEvent = {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+};
+
+type SpeechRecCtor = new () => {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((ev: SpeechResultEvent) => void) | null;
+  onerror: ((ev: Event) => void) | null;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+export type TranscribeResultMeta = {
+  /** Live browser-tekst eerst opgeslagen; Whisper draait nog na. */
+  provisional?: boolean;
+};
+
 type Props = {
   meetingId: string;
-  onTranscribed: (transcript: string, title: string) => void;
+  onTranscribed: (transcript: string, title: string, meta?: TranscribeResultMeta) => void;
 };
 
 /** Systeem-audio = scherm/venster delen (desktop-apps, alles wat uit je speakers komt). Tab = alleen die ene browsertab. Mic = fysiek / headset. */
@@ -24,9 +52,20 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
   const [volume, setVolume] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [liveSpeechText, setLiveSpeechText] = useState("");
+  const [speechAvailable, setSpeechAvailable] = useState(false);
+  /** Live spraak expliciet gestart (aparte klik — nodig voor Chrome user activation na schermdeel-dialog). */
+  const [liveSpeechUserStarted, setLiveSpeechUserStarted] = useState(false);
+  const [speechStatus, setSpeechStatus] = useState<"off" | "listening" | "error">("off");
+  const [speechHint, setSpeechHint] = useState<string | null>(null);
+  const [lastProvisional, setLastProvisional] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const liveSpeechFinalRef = useRef("");
+  /** Web Speech API (Chrome/Edge); alleen microfoon-audio, niet tab/systeem-geluid. */
+  const recognitionRef = useRef<InstanceType<SpeechRecCtor> | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const latestLiveTranscriptRef = useRef("");
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -58,8 +97,123 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
         ? "audio/ogg"
         : "audio/webm";
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const w = window as unknown as {
+      SpeechRecognition?: SpeechRecCtor;
+      webkitSpeechRecognition?: SpeechRecCtor;
+    };
+    setSpeechAvailable(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
+  }, []);
+
+  const getSpeechCtor = useCallback((): SpeechRecCtor | null => {
+    if (typeof window === "undefined") return null;
+    const w = window as unknown as {
+      SpeechRecognition?: SpeechRecCtor;
+      webkitSpeechRecognition?: SpeechRecCtor;
+    };
+    return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+  }, []);
+
+  const stopSpeechRecognition = useCallback(() => {
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
+    recognitionRef.current = null;
+    setSpeechStatus("off");
+  }, []);
+
+  const startSpeechRecognition = useCallback((resetAccumulated: boolean) => {
+    const Ctor = getSpeechCtor();
+    if (!Ctor) return;
+
+    if (resetAccumulated) {
+      liveSpeechFinalRef.current = "";
+      latestLiveTranscriptRef.current = "";
+      setLiveSpeechText("");
+    }
+
+    const rec = new Ctor();
+    rec.lang = "nl-NL";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (event: SpeechResultEvent) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) liveSpeechFinalRef.current += `${t} `;
+        else interim += t;
+      }
+      latestLiveTranscriptRef.current = (liveSpeechFinalRef.current + interim).trim();
+      setLiveSpeechText(liveSpeechFinalRef.current + interim);
+    };
+    rec.onerror = (ev: Event) => {
+      const err = (ev as unknown as { error?: string }).error;
+      if (err === "aborted" || err === "no-speech") return;
+      setSpeechStatus("error");
+      if (err === "not-allowed") {
+        setSpeechHint("Microfoon geblokkeerd voor spraakherkenning — controleer site-toestemming in de browser.");
+      } else if (err === "audio-capture") {
+        setSpeechHint("Geen microfoon beschikbaar (of in gebruik door de opname).");
+      } else if (err === "network") {
+        setSpeechHint("Netwerkfout bij spraakherkenning (Google-dienst).");
+      } else {
+        setSpeechHint(`Spraakherkenning: ${err || "onbekende fout"}`);
+      }
+    };
+    rec.onstart = () => {
+      setSpeechStatus("listening");
+      setSpeechHint(null);
+    };
+    rec.onend = () => {
+      if (mediaRecorderRef.current?.state === "recording") {
+        try {
+          rec.start();
+        } catch {
+          /* herstart na limiet */
+        }
+      } else {
+        setSpeechStatus("off");
+      }
+    };
+    recognitionRef.current = rec;
+    try {
+      rec.start();
+    } catch {
+      setSpeechStatus("error");
+      setSpeechHint("Spraakherkenning start niet — probeer opnieuw of gebruik de knop hieronder.");
+      setLiveSpeechUserStarted(false);
+    }
+  }, [getSpeechCtor]);
+
+  /** Aparte klik na start opname: Chrome vereist user activation ná het schermdeel-dialog. */
+  const handleStartLiveSpeech = useCallback(async () => {
+    setSpeechHint(null);
+    const Ctor = getSpeechCtor();
+    if (!Ctor) {
+      setSpeechHint("Gebruik Chrome of Edge voor live ondertiteling.");
+      return;
+    }
+    try {
+      if (captureMode !== "mic") {
+        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mic.getTracks().forEach((t) => t.stop());
+      }
+    } catch {
+      setSpeechHint("Geen microfoontoestemming — live tekst heeft een microfoon (naast tab-/schermgeluid).");
+      return;
+    }
+    setLiveSpeechUserStarted(true);
+    startSpeechRecognition(true);
+  }, [captureMode, getSpeechCtor, startSpeechRecognition]);
+
   const start = useCallback(async () => {
     setError(null);
+    setLiveSpeechUserStarted(false);
+    setSpeechHint(null);
+    setSpeechStatus("off");
     try {
       let stream: MediaStream;
 
@@ -129,6 +283,15 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
 
       startVolumeMonitor(stream);
 
+      /* Alleen microfoon: geen getDisplayMedia → user activation blijft vaak bruikbaar voor Web Speech. */
+      if (captureMode === "mic") {
+        const Ctor = getSpeechCtor();
+        if (Ctor) {
+          setLiveSpeechUserStarted(true);
+          startSpeechRecognition(true);
+        }
+      }
+
       await fetch(`/api/meetings/${meetingId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -142,20 +305,22 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
         setError(msg || "Opname starten mislukt");
       }
     }
-  }, [meetingId, captureMode]);
+  }, [meetingId, captureMode, getSpeechCtor, startSpeechRecognition]);
 
   const pause = useCallback(() => {
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.pause();
+      stopSpeechRecognition();
       setState("paused");
       if (timerRef.current) clearInterval(timerRef.current);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     }
-  }, []);
+  }, [stopSpeechRecognition]);
 
   const resume = useCallback(() => {
     if (mediaRecorderRef.current?.state === "paused") {
       mediaRecorderRef.current.resume();
+      if (liveSpeechUserStarted) startSpeechRecognition(false);
       setState("recording");
       const pausedAt = Date.now() - duration * 1000;
       timerRef.current = setInterval(() => {
@@ -163,7 +328,7 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       }, 1000);
       if (streamRef.current) startVolumeMonitor(streamRef.current);
     }
-  }, [duration]);
+  }, [duration, startSpeechRecognition, liveSpeechUserStarted]);
 
   const stopAllStreams = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -184,6 +349,7 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       mediaRecorderRef.current!.stop();
     });
 
+    stopSpeechRecognition();
     stopAllStreams();
 
     const mimeType = mediaRecorderRef.current.mimeType || "audio/webm";
@@ -198,6 +364,7 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     const formData = new FormData();
     formData.append("audio", blob, "recording.webm");
     formData.append("mimeType", mimeType);
+    formData.append("liveTranscript", latestLiveTranscriptRef.current.trim());
 
     const progressInterval = setInterval(() => {
       setProgress((p) => Math.min(90, p + 5));
@@ -213,14 +380,17 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
 
       if (!res.ok) throw new Error("Transcriptie mislukt");
       const data = await res.json();
+      setLastProvisional(Boolean(data.provisional));
       setState("done");
-      onTranscribed(data.transcript?.content || "", data.title || "");
+      onTranscribed(data.transcript?.content || "", data.title || "", {
+        provisional: Boolean(data.provisional),
+      });
     } catch (err: unknown) {
       clearInterval(progressInterval);
       setError(err instanceof Error ? err.message : "Transcriptie mislukt");
       setState("idle");
     }
-  }, [meetingId, duration, onTranscribed, stopAllStreams]);
+  }, [meetingId, duration, onTranscribed, stopAllStreams, stopSpeechRecognition]);
 
   useEffect(() => {
     return () => {
@@ -264,8 +434,10 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       <div className="flex flex-col items-center gap-4 rounded-xl border border-indigo-100 bg-indigo-50 p-8">
         <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
         <div className="text-center">
-          <p className="font-medium text-indigo-700">Transcriptie bezig…</p>
-          <p className="text-sm text-indigo-500 mt-1">Dit kan even duren</p>
+          <p className="font-medium text-indigo-700">Audio versturen…</p>
+          <p className="text-sm text-indigo-500 mt-1">
+            Bij voldoende live-tekst krijg je direct een versie; Whisper werkt daarna bij.
+          </p>
         </div>
         <Progress value={progress} className="w-full max-w-xs" />
       </div>
@@ -279,6 +451,12 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
           <Mic className="h-6 w-6 text-green-600" />
         </div>
         <p className="font-medium text-green-700">Transcriptie klaar</p>
+        {lastProvisional && (
+          <p className="text-xs text-center text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 max-w-md">
+            Whisper verfijnt het transcript op de achtergrond (timestamps volgen). Je kunt al notulen genereren;
+            even verversen als de tekst nog bijwerkt.
+          </p>
+        )}
         <p className="text-sm text-green-600">Duur: {formatDuration(duration)}</p>
       </div>
     );
@@ -410,6 +588,75 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
           <p className="text-center text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 max-w-md">
             Laat het gedeelde tabblad of venster open tot je op Stop drukt — anders stopt de opname mee.
           </p>
+        )}
+
+        {(state === "recording" || state === "paused") && (
+          <div className="w-full max-w-xl space-y-2">
+            <p className="text-xs font-medium text-gray-700">Live meeschrijven (browser)</p>
+            {!speechAvailable && (
+              <p className="text-[11px] text-gray-500">
+                Live ondertiteling werkt in Chrome of Edge (Web Speech API). In andere browsers alleen Whisper na
+                afloop.
+              </p>
+            )}
+            {speechAvailable && !liveSpeechUserStarted && (
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50/80 p-3 space-y-2">
+                <p className="text-[11px] text-indigo-900 leading-relaxed">
+                  Na het delen van je scherm/tab moet je <strong>apart</strong> live spraak starten — anders blokkeert
+                  de browser de microfoon voor herkenning. Klik hieronder en geef microfoon toe.
+                </p>
+                {captureMode !== "mic" && (
+                  <p className="text-[11px] text-amber-800 bg-amber-50 rounded px-2 py-1">
+                    Je opname bevat tab-/systeemgeluid; live tekst gebruikt je <strong>microfoon</strong> (eigen stem of
+                    wat je speakers meegeven). Het volledige gesprek volgt via Whisper.
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="w-full gap-2 bg-indigo-600 text-white hover:bg-indigo-700"
+                  onClick={handleStartLiveSpeech}
+                  disabled={state === "paused"}
+                >
+                  <Mic className="h-4 w-4" />
+                  Start live meeschrijven (microfoon)
+                </Button>
+                {state === "paused" && (
+                  <p className="text-[10px] text-muted-foreground">Hervat de opname om live spraak te starten.</p>
+                )}
+              </div>
+            )}
+            {speechHint && (
+              <p className="text-[11px] text-red-700 bg-red-50 border border-red-100 rounded px-2 py-1.5">
+                {speechHint}
+              </p>
+            )}
+            {liveSpeechUserStarted && (
+              <div className="flex items-center gap-2 text-[11px] text-gray-600">
+                <span
+                  className={cn(
+                    "inline-flex h-2 w-2 rounded-full",
+                    speechStatus === "listening" ? "bg-green-500 animate-pulse" : "bg-gray-300"
+                  )}
+                />
+                {speechStatus === "listening"
+                  ? "Luistert…"
+                  : speechStatus === "error"
+                    ? "Gestopt — zie melding hierboven"
+                    : "Start…"}
+              </div>
+            )}
+            {(liveSpeechUserStarted || liveSpeechText) && (
+              <ScrollArea className="h-36 rounded-lg border border-gray-200 bg-gray-50/80 p-3 text-sm text-gray-800">
+                {liveSpeechText ? (
+                  <p className="whitespace-pre-wrap leading-relaxed">{liveSpeechText}</p>
+                ) : (
+                  <p className="text-gray-400 text-xs">Spreek — de tekst verschijnt hier…</p>
+                )}
+              </ScrollArea>
+            )}
+          </div>
         )}
       </div>
     </div>

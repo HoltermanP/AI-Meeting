@@ -10,9 +10,11 @@ import type { TranscriptSegment } from "@/types";
 type Props = {
   content: string;
   segments?: TranscriptSegment[];
+  /** Live browser-tekst; Whisper vervangt straks met tijdstippen. */
+  isProvisional?: boolean;
 };
 
-export default function TranscriptView({ content, segments = [] }: Props) {
+export default function TranscriptView({ content, segments = [], isProvisional }: Props) {
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
 
@@ -52,6 +54,11 @@ export default function TranscriptView({ content, segments = [] }: Props) {
           <span className="text-xs text-gray-400 font-normal">
             ({segments.length} segments)
           </span>
+          {isProvisional && (
+            <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-900">
+              Voorlopig
+            </span>
+          )}
         </button>
         {!collapsed && (
           <div className="relative">
@@ -65,6 +72,13 @@ export default function TranscriptView({ content, segments = [] }: Props) {
           </div>
         )}
       </div>
+
+      {isProvisional && !collapsed && (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Dit is voorlopige tekst (live herkenning). Whisper vervangt dit door een definitieve transcriptie met
+          tijdstippen zodra de verwerking klaar is.
+        </p>
+      )}
 
       {!collapsed && (
         <ScrollArea className="h-96 rounded-xl border border-gray-200 bg-gray-50">

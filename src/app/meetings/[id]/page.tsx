@@ -192,15 +192,39 @@ export default function MeetingDetailPage() {
     else await exportPdf();
   }
 
-  const onTranscribed = useCallback((transcript: string, newTitle: string) => {
-    setMeeting((m: any) => ({
-      ...m,
-      status: "completed",
-      title: newTitle || m.title,
-      transcript: { content: transcript },
-    }));
-    if (newTitle) setTitle(newTitle);
-  }, []);
+  const onTranscribed = useCallback(
+    (transcript: string, newTitle: string, meta?: { provisional?: boolean }) => {
+      setMeeting((m: any) => ({
+        ...m,
+        status: "completed",
+        title: newTitle || m.title,
+        transcript: {
+          ...m.transcript,
+          content: transcript,
+          isProvisional: Boolean(meta?.provisional),
+        },
+      }));
+      if (newTitle) setTitle(newTitle);
+    },
+    []
+  );
+
+  useEffect(() => {
+    const prov = meeting?.transcript?.isProvisional;
+    if (!prov || !id) return;
+    const t = setInterval(() => {
+      fetch(`/api/meetings/${id}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (!data?.transcript?.isProvisional) {
+            setMeeting(data);
+            if (data.title) setTitle(data.title);
+          }
+        })
+        .catch(() => {});
+    }, 4000);
+    return () => clearInterval(t);
+  }, [meeting?.transcript?.isProvisional, id]);
 
   if (loading) {
     return (
@@ -400,6 +424,7 @@ export default function MeetingDetailPage() {
                 <TranscriptView
                   content={meeting.transcript.content}
                   segments={segments}
+                  isProvisional={Boolean(meeting.transcript.isProvisional)}
                 />
               </div>
             )}

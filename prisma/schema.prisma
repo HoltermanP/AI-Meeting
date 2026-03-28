@@ -90,6 +90,8 @@ model Transcript {
   meetingId String   @unique
   content   String
   segments  String
+  /// True zolang alleen live browser-tekst staat; Whisper vervangt daarna inhoud.
+  isProvisional Boolean @default(false)
   language  String   @default("en")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
