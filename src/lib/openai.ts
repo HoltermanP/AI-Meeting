@@ -2,9 +2,12 @@ import OpenAI from "openai";
 import { writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
+import { chatCompletion, chatCompletionMulti } from "@/lib/llm";
 
-const CHAT_MODEL = "gpt-4o";
-const TITLE_MODEL = "gpt-4o-mini";
+/** Whisper-transcriptie blijft via OpenAI (geen Anthropic speech-to-text). */
+export const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 /** Alle gegenereerde teksten (notities, chat, titels) in het Nederlands. */
 const TAAL_NL =
@@ -32,72 +35,6 @@ Geen andere koppen, geen colofon, geen titelregel met datum boven ## Samenvattin
 
 const AI_KIEST_ACTIES =
   "Er zijn geen vaste regels voor actiepunten: extraheer concrete taken uit het transcript; gebruik per item waar mogelijk title, assignee (eigenaar), description (korte toelichting).";
-
-export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-async function chatText(systemPrompt: string, userPrompt: string, maxTokens = 4096): Promise<string> {
-  const response = await openai.chat.completions.create({
-    model: CHAT_MODEL,
-    max_tokens: maxTokens,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-  });
-  const text = response.choices[0]?.message?.content;
-  if (!text) throw new Error("Leeg antwoord van OpenAI");
-  return text;
-}
-
-export async function transcribeAudio(
-  audioBuffer: Buffer,
-  mimeType: string = "audio/webm"
-): Promise<{
-  text: string;
-  segments: Array<{ start: number; end: number; text: string }>;
-}> {
-  const ext = mimeType.includes("mp4")
-    ? "mp4"
-    : mimeType.includes("wav")
-      ? "wav"
-      : mimeType.includes("ogg")
-        ? "ogg"
-        : "webm";
-
-  const tmpPath = join(tmpdir(), `recording-${Date.now()}.${ext}`);
-
-  try {
-    await writeFile(tmpPath, audioBuffer);
-
-    const { createReadStream } = await import("fs");
-    const stream = createReadStream(tmpPath);
-
-    const response = await openai.audio.transcriptions.create({
-      file: stream as any,
-      model: "whisper-1",
-      response_format: "verbose_json",
-      timestamp_granularities: ["segment"],
-    });
-
-    const segments =
-      (response as { segments?: Array<{ start: number; end: number; text: string }> }).segments?.map(
-        (s) => ({
-          start: s.start,
-          end: s.end,
-          text: s.text,
-        })
-      ) || [];
-
-    return {
-      text: response.text,
-      segments,
-    };
-  } finally {
-    await unlink(tmpPath).catch(() => {});
-  }
-}
 
 export type GenerateNotesTemplate = {
   reportStructure?: string | null;
@@ -188,7 +125,12 @@ Lever in één antwoord:
 \`\`\`
 Als er geen actiepunten zijn: [].`;
 
-  const content = await chatText(systemPrompt, userPrompt, hasWordFields ? 8192 : 4096);
+  const content = await chatCompletion(
+    "notes",
+    systemPrompt,
+    userPrompt,
+    hasWordFields ? 8192 : 4096
+  );
 
   const jsonBlocks = [...content.matchAll(/```json\n?([\s\S]*?)\n?```/g)].map((x) => x[1].trim());
   let actionItems: Array<{ title: string; assignee?: string; description?: string }> = [];
@@ -305,6 +247,54 @@ Als er geen actiepunten zijn: [].`;
   };
 }
 
+export async function transcribeAudio(
+  audioBuffer: Buffer,
+  mimeType: string = "audio/webm"
+): Promise<{
+  text: string;
+  segments: Array<{ start: number; end: number; text: string }>;
+}> {
+  const ext = mimeType.includes("mp4")
+    ? "mp4"
+    : mimeType.includes("wav")
+      ? "wav"
+      : mimeType.includes("ogg")
+        ? "ogg"
+        : "webm";
+
+  const tmpPath = join(tmpdir(), `recording-${Date.now()}.${ext}`);
+
+  try {
+    await writeFile(tmpPath, audioBuffer);
+
+    const { createReadStream } = await import("fs");
+    const stream = createReadStream(tmpPath);
+
+    const response = await openai.audio.transcriptions.create({
+      file: stream as never,
+      model: "whisper-1",
+      response_format: "verbose_json",
+      timestamp_granularities: ["segment"],
+    });
+
+    const segments =
+      (response as { segments?: Array<{ start: number; end: number; text: string }> }).segments?.map(
+        (s) => ({
+          start: s.start,
+          end: s.end,
+          text: s.text,
+        })
+      ) || [];
+
+    return {
+      text: response.text,
+      segments,
+    };
+  } finally {
+    await unlink(tmpPath).catch(() => {});
+  }
+}
+
 export async function chatWithTranscript(
   transcript: string,
   notes: string,
@@ -320,23 +310,14 @@ ${transcript}
 NOTITIES:
 ${notes}`;
 
-  const response = await openai.chat.completions.create({
-    model: CHAT_MODEL,
-    max_tokens: 1024,
-    messages: [
-      { role: "system", content: systemPrompt },
-      ...messages.map((m) => ({ role: m.role, content: m.content })),
-    ],
-  });
-  const text = response.choices[0]?.message?.content;
-  if (!text) throw new Error("Leeg antwoord van OpenAI");
-  return text;
+  return chatCompletionMulti("chat", systemPrompt, messages, 1024);
 }
 
 export async function extractActionItems(
   transcript: string
 ): Promise<Array<{ title: string; assignee?: string; description?: string }>> {
-  const content = await chatText(
+  const content = await chatCompletion(
+    "actions",
     `Je extraheert gestructureerde data uit transcripten. ${TAAL_NL} Antwoord alleen met JSON als gevraagd.`,
     `Haal alle actiepunten uit dit vergadertranscript. Geef een JSON-array met objecten: title (verplicht), assignee (optioneel), description (optioneel). Waarden in het Nederlands waar het om taken gaat.
 
@@ -356,19 +337,14 @@ Alleen geldige JSON, geen andere tekst.`,
 }
 
 export async function generateTitle(transcript: string): Promise<string> {
-  const response = await openai.chat.completions.create({
-    model: TITLE_MODEL,
-    max_tokens: 100,
-    messages: [
-      {
-        role: "user",
-        content: `Bedenk een korte, duidelijke titel (5–8 woorden) voor deze vergadering op basis van het transcript. Alleen de titel, verder niets. Nederlands.
+  const text = await chatCompletion(
+    "title",
+    "",
+    `Bedenk een korte, duidelijke titel (5–8 woorden) voor deze vergadering op basis van het transcript. Alleen de titel, verder niets. Nederlands.
 
 TRANSCRIPT (eerste 500 tekens):
 ${transcript.slice(0, 500)}`,
-      },
-    ],
-  });
-  const text = response.choices[0]?.message?.content?.trim().replace(/^["']|["']$/g, "");
-  return text || "Naamloze meeting";
+    100
+  );
+  return text.trim().replace(/^["']|["']$/g, "") || "Naamloze meeting";
 }

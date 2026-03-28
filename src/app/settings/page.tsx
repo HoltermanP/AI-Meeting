@@ -321,12 +321,32 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
-              Zet <code className="font-mono text-xs bg-amber-100 px-1 rounded">OPENAI_API_KEY</code>{" "}
-              voor transcriptie en notities.
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800 space-y-2">
+              <p>
+                In <code className="font-mono text-xs bg-amber-100 px-1 rounded">.env</code> op de server:
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-xs">
+                <li>
+                  <code className="bg-amber-100 px-1 rounded">OPENAI_API_KEY</code> — verplicht voor{" "}
+                  <strong>transcriptie</strong> (Whisper). Ook gebruikt voor tekst als je geen Anthropic
+                  hebt.
+                </li>
+                <li>
+                  <code className="bg-amber-100 px-1 rounded">ANTHROPIC_API_KEY</code> — optioneel; voor
+                  notities, chat en extractie worden dan per taak de beste Claude-modellen gebruikt
+                  (Opus voor lange verslagen, Sonnet voor chat, Haiku voor titels/acties).
+                </li>
+                <li>
+                  <code className="bg-amber-100 px-1 rounded">AI_PROVIDER</code> —{" "}
+                  <code className="bg-amber-100 px-1 rounded">auto</code> (standaard: Anthropic als de
+                  sleutel er is, anders OpenAI), <code className="bg-amber-100 px-1 rounded">openai</code>{" "}
+                  of <code className="bg-amber-100 px-1 rounded">anthropic</code> om één provider te
+                  forceren voor alle teksttaken.
+                </li>
+              </ul>
             </div>
             <div className="space-y-1.5">
-              <Label>OpenAI API Key (lokaal voorbeeld)</Label>
+              <Label>OpenAI API Key (lokaal voorbeeld — niet opgeslagen in de app)</Label>
               <Input
                 type="password"
                 value={openaiKey}
