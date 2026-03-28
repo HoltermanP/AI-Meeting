@@ -1,0 +1,196 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts  Account[]
+  sessions  Session[]
+  meetings  Meeting[]
+  templates Template[]
+  folders   Folder[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Meeting {
+  id          String    @id @default(cuid())
+  title       String
+  status      String    @default("draft")
+  platform    String?
+  startedAt   DateTime?
+  endedAt     DateTime?
+  duration    Int?
+  audioPath   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folderId   String?
+  folder     Folder?   @relation(fields: [folderId], references: [id])
+  templateId String?
+  template   Template? @relation(fields: [templateId], references: [id])
+
+  transcript   Transcript?
+  notes        Notes?
+  actionItems  ActionItem[]
+  chatMessages ChatMessage[]
+  participants Participant[]
+  tags         MeetingTag[]
+}
+
+model Transcript {
+  id        String   @id @default(cuid())
+  meetingId String   @unique
+  content   String
+  segments  String
+  language  String   @default("en")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+}
+
+model Notes {
+  id        String   @id @default(cuid())
+  meetingId String   @unique
+  content   String
+  summary   String?
+  rawNotes  String?
+  /// JSON object: per-Word-veld tekst ({{samenvatting}}, …) voor huisstijl-export
+  wordPlaceholders String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+}
+
+model ActionItem {
+  id          String    @id @default(cuid())
+  meetingId   String
+  title       String
+  description String?
+  assignee    String?
+  dueDate     DateTime?
+  completed   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  meetingId String
+  role      String
+  content   String
+  createdAt DateTime @default(now())
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+}
+
+model Participant {
+  id        String  @id @default(cuid())
+  meetingId String
+  name      String
+  email     String?
+  role      String?
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+}
+
+model Template {
+  id                      String   @id @default(cuid())
+  name                    String
+  description             String?
+  content                 String
+  /// Optioneel: hoe actiepunten geëxtraheerd moeten worden (velden, prioriteit). Leeg = AI kiest zelf.
+  actionItemsInstructions String?
+  /// Relatief pad naar .docx op schijf (uploads/), voor export met huisstijl. Null = geen Word-sjabloon.
+  docxPath                String?
+  /// JSON-array van placeholder-namen uit het .docx (zonder {{ }}), bv. ["samenvatting","besluiten"]
+  docxPlaceholderKeys     String?
+  isDefault               Boolean  @default(false)
+  isPublic    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meetings Meeting[]
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String
+  color     String   @default("#6366f1")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meetings Meeting[]
+}
+
+model Tag {
+  id       String       @id @default(cuid())
+  name     String
+  color    String       @default("#6366f1")
+  meetings MeetingTag[]
+}
+
+model MeetingTag {
+  meetingId String
+  tagId     String
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([meetingId, tagId])
+}

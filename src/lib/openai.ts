@@ -1,0 +1,374 @@
+import OpenAI from "openai";
+import { writeFile, unlink } from "fs/promises";
+import { join } from "path";
+import { tmpdir } from "os";
+
+const CHAT_MODEL = "gpt-4o";
+const TITLE_MODEL = "gpt-4o-mini";
+
+/** Alle gegenereerde teksten (notities, chat, titels) in het Nederlands. */
+const TAAL_NL =
+  "Schrijf ALLES in het Nederlands: koppen, notities, samenvatting, actiepunten en toelichtingen. Behoud namen en vakjargon uit het transcript waar nodig.";
+
+/** Vast, leesbaar format als er geen template is — ook wat op scherm/PDF/Word komt. */
+const STANDAARD_VERSLAG_FORMAT = `Er is geen sjabloon gekozen. Gebruik exact deze Markdown-structuur (##-koppen in deze volgorde). Vul elke sectie uit op basis van het transcript; alleen lege secties mag je weglaten of één zin "(Niet besproken.)".
+
+## Samenvatting
+3–5 zinnen: doel, belangrijkste uitkomst.
+
+## Vergaderverloop
+Genummerde of bulletlijst: wat er in chronologische of thematische volgorde aan bod kwam.
+
+## Besluiten
+Bulletlijst van genomen besluiten; zo geen: "(Geen expliciete besluiten.)"
+
+## Actiepunten (in dit verslag)
+Markdown-lijst met taken, eigenaar waar bekend — dezelfde taken komen ook in het JSON-blok.
+
+## Bijzonderheden / vervolg (optioneel)
+Alleen als relevant; anders weglaten.
+
+Geen andere koppen, geen colofon, geen titelregel met datum boven ## Samenvatting. Alleen deze structuur.`;
+
+const AI_KIEST_ACTIES =
+  "Er zijn geen vaste regels voor actiepunten: extraheer concrete taken uit het transcript; gebruik per item waar mogelijk title, assignee (eigenaar), description (korte toelichting).";
+
+export const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+async function chatText(systemPrompt: string, userPrompt: string, maxTokens = 4096): Promise<string> {
+  const response = await openai.chat.completions.create({
+    model: CHAT_MODEL,
+    max_tokens: maxTokens,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+  });
+  const text = response.choices[0]?.message?.content;
+  if (!text) throw new Error("Leeg antwoord van OpenAI");
+  return text;
+}
+
+export async function transcribeAudio(
+  audioBuffer: Buffer,
+  mimeType: string = "audio/webm"
+): Promise<{
+  text: string;
+  segments: Array<{ start: number; end: number; text: string }>;
+}> {
+  const ext = mimeType.includes("mp4")
+    ? "mp4"
+    : mimeType.includes("wav")
+      ? "wav"
+      : mimeType.includes("ogg")
+        ? "ogg"
+        : "webm";
+
+  const tmpPath = join(tmpdir(), `recording-${Date.now()}.${ext}`);
+
+  try {
+    await writeFile(tmpPath, audioBuffer);
+
+    const { createReadStream } = await import("fs");
+    const stream = createReadStream(tmpPath);
+
+    const response = await openai.audio.transcriptions.create({
+      file: stream as any,
+      model: "whisper-1",
+      response_format: "verbose_json",
+      timestamp_granularities: ["segment"],
+    });
+
+    const segments =
+      (response as { segments?: Array<{ start: number; end: number; text: string }> }).segments?.map(
+        (s) => ({
+          start: s.start,
+          end: s.end,
+          text: s.text,
+        })
+      ) || [];
+
+    return {
+      text: response.text,
+      segments,
+    };
+  } finally {
+    await unlink(tmpPath).catch(() => {});
+  }
+}
+
+export type GenerateNotesTemplate = {
+  reportStructure?: string | null;
+  actionItemsInstructions?: string | null;
+  /** Word-velden ({{key}}) die de AI moet vullen — dan past het verslag in het sjabloon */
+  wordPlaceholderKeys?: string[];
+};
+
+export async function generateMeetingNotes(
+  transcript: string,
+  template?: GenerateNotesTemplate | null,
+  rawNotes?: string
+): Promise<{
+  notes: string;
+  summary: string;
+  actionItems: Array<{ title: string; assignee?: string; description?: string }>;
+  wordPlaceholders?: Record<string, string>;
+}> {
+  const fillKeys = (template?.wordPlaceholderKeys || []).filter(Boolean);
+  const hasWordFields = fillKeys.length > 0;
+
+  const hasReportTemplate = Boolean(template?.reportStructure?.trim());
+  const reportBlock = hasReportTemplate
+    ? `Het verslag moet ALLEEN bestaan uit inhoud volgens onderstaande sjabloonstructuur (vertaal koppen naar Nederlands waar nodig). Voeg geen extra secties, inleiding, samenvatting-kop of datumkop toe die niet in de structuur staan. Geen tekst vóór de eerste ##-kop behalve als de structuur dat expliciet vraagt.
+
+Sjabloonstructuur:
+${template!.reportStructure}`
+    : STANDAARD_VERSLAG_FORMAT;
+
+  const actionBlock = template?.actionItemsInstructions?.trim()
+    ? `Actiepunten — volg strikt deze instructies voor extractie en velden:\n${template.actionItemsInstructions}\n\nLever de actiepunten als JSON-array van objecten met minstens "title"; voeg toe wat de instructies vragen (bijv. assignee, dueDate als tekst, priority).`
+    : `${AI_KIEST_ACTIES}\n\nLever een JSON-array van objecten: { "title": string, "assignee"?: string, "description"?: string }.`;
+
+  const wordBlock = hasWordFields
+    ? `
+WORD-SJABLOON (verplicht)
+Het exportdocument heeft deze invulvelden. Je MOET elk veld vullen met inhoud uit het transcript (Nederlands). Gebruik exact deze JSON-keys (geen andere keys):
+${JSON.stringify(fillKeys)}
+
+Regels:
+- Elke key = één tekstblok voor die plek in Word (alinea's met \\n waar nodig).
+- Geen Markdown-koppen # in korte velden; bij "notes" mag wel ##-structuur als dat veld het hele verslag bevat.
+- Leeg als echt niets past: "".
+`
+    : "";
+
+  const systemPrompt = `Je bent een expert in het maken van vergadernotities en actielijsten. Je zet transcripten om naar duidelijke, gestructureerde notities in het Nederlands.
+
+${TAAL_NL}
+
+VERSLAG:
+${reportBlock}
+${wordBlock}
+
+ACTIELIJST:
+${actionBlock}`;
+
+  const userPrompt = hasWordFields
+    ? `Analyseer dit vergadertranscript.
+
+TRANSCRIPT:
+${transcript}
+
+${rawNotes ? `\nAANVULLENDE NOTITIES VAN DEELNEMER:\n${rawNotes}` : ""}
+
+Lever in één antwoord, in deze volgorde:
+1) Een codeblok JSON-object met ALLE velden: ${fillKeys.map((k) => `"${k}"`).join(", ")} — strings, Nederlands.
+Voorbeeld:
+\`\`\`json
+{ ${fillKeys.map((k) => `"${k}":"…"`).join(", ")} }
+\`\`\`
+2) Een codeblok JSON-array van actiepunten (title, optioneel assignee, description).
+\`\`\`json
+[]
+\`\`\``
+    : `Analyseer dit vergadertranscript.
+
+TRANSCRIPT:
+${transcript}
+
+${rawNotes ? `\nAANVULLENDE NOTITIES VAN DEELNEMER:\n${rawNotes}` : ""}
+
+Lever in één antwoord:
+1. Het volledige verslag in Markdown (Nederlands).
+2. Een codeblok alleen met JSON-array van actiepunten (objecten met title, optioneel assignee/description), bijvoorbeeld:
+\`\`\`json
+[{"title":"…","assignee":"…","description":"…"}]
+\`\`\`
+Als er geen actiepunten zijn: [].`;
+
+  const content = await chatText(systemPrompt, userPrompt, hasWordFields ? 8192 : 4096);
+
+  const jsonBlocks = [...content.matchAll(/```json\n?([\s\S]*?)\n?```/g)].map((x) => x[1].trim());
+  let actionItems: Array<{ title: string; assignee?: string; description?: string }> = [];
+  let wordPlaceholders: Record<string, string> = {};
+
+  if (hasWordFields && jsonBlocks.length >= 1) {
+    const tryObject = (raw: string): boolean => {
+      let s = raw.trim();
+      if (!s) return false;
+      try {
+        const o = JSON.parse(s) as Record<string, unknown>;
+        if (!o || typeof o !== "object" || Array.isArray(o)) return false;
+        let hit = false;
+        for (const k of fillKeys) {
+          if (k in o) {
+            const v = o[k];
+            wordPlaceholders[k] = typeof v === "string" ? v : v != null ? String(v) : "";
+            hit = true;
+          }
+        }
+        return hit;
+      } catch {
+        return false;
+      }
+    };
+    /** AI geeft soms trailing comma of comment — licht opruimen */
+    const relaxedParse = (raw: string) => {
+      if (tryObject(raw)) return;
+      const noTrail = raw.replace(/,\s*([}\]])/g, "$1");
+      if (noTrail !== raw) tryObject(noTrail);
+    };
+    for (const block of jsonBlocks) {
+      relaxedParse(block);
+      if (Object.keys(wordPlaceholders).length >= fillKeys.length) break;
+    }
+    if (Object.keys(wordPlaceholders).length === 0) {
+      for (const block of jsonBlocks) {
+        relaxedParse(block);
+        if (Object.keys(wordPlaceholders).length > 0) break;
+      }
+    }
+    for (let i = 0; i < jsonBlocks.length; i++) {
+      try {
+        const parsed = JSON.parse(jsonBlocks[i].replace(/,\s*([}\]])/g, "$1"));
+        if (Array.isArray(parsed)) {
+          actionItems = parsed.map((item: unknown) => {
+            if (typeof item === "string") return { title: item };
+            const o = item as { title?: string; assignee?: string; description?: string };
+            return {
+              title: o.title || String(item),
+              assignee: o.assignee,
+              description: o.description,
+            };
+          });
+          break;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  } else {
+    const actionItemMatch = content.match(/```json\n?([\s\S]*?)\n?```/);
+    if (actionItemMatch) {
+      try {
+        const parsed = JSON.parse(actionItemMatch[1]);
+        if (Array.isArray(parsed)) {
+          actionItems = parsed.map((item: unknown) => {
+            if (typeof item === "string") return { title: item };
+            const o = item as { title?: string; assignee?: string; description?: string };
+            return {
+              title: o.title || String(item),
+              assignee: o.assignee,
+              description: o.description,
+            };
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  let notesForStorage: string;
+  if (hasWordFields && Object.keys(wordPlaceholders).length > 0) {
+    notesForStorage = fillKeys
+      .map((k) => {
+        const body = wordPlaceholders[k] || "";
+        if (k === "notes") return body;
+        const label = k.replace(/_/g, " ");
+        return `## ${label}\n\n${body}`;
+      })
+      .join("\n\n");
+  } else if (hasWordFields) {
+    /** JSON voor Word mislukte — geen alles wissen: rest van antwoord = verslag */
+    notesForStorage = content
+      .replace(/```json\n?[\s\S]*?\n?```/g, "")
+      .trim();
+    if (!notesForStorage && fillKeys.includes("notes")) {
+      notesForStorage =
+        "_(Word-velden konden niet worden uitgelezen; genereer opnieuw of controleer het JSON-blok in het AI-antwoord.)_";
+    }
+  } else {
+    notesForStorage = content.replace(/```json\n?[\s\S]*?\n?```/g, "").trim();
+  }
+
+  const summaryMatch = notesForStorage.match(/## (?:Samenvatting|Summary|samenvatting)\n([\s\S]*?)(?=\n##|$)/i);
+  const summary = summaryMatch ? summaryMatch[1].trim() : (wordPlaceholders.samenvatting || "").slice(0, 500);
+
+  return {
+    notes: notesForStorage,
+    summary,
+    actionItems,
+    ...(hasWordFields ? { wordPlaceholders } : {}),
+  };
+}
+
+export async function chatWithTranscript(
+  transcript: string,
+  notes: string,
+  messages: { role: "user" | "assistant"; content: string }[]
+): Promise<string> {
+  const systemPrompt = `Je helpt bij vragen over één vergadering. Je hebt het transcript en de notities. Wees beknopt en nauwkeurig.
+
+${TAAL_NL}
+
+TRANSCRIPT:
+${transcript}
+
+NOTITIES:
+${notes}`;
+
+  const response = await openai.chat.completions.create({
+    model: CHAT_MODEL,
+    max_tokens: 1024,
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...messages.map((m) => ({ role: m.role, content: m.content })),
+    ],
+  });
+  const text = response.choices[0]?.message?.content;
+  if (!text) throw new Error("Leeg antwoord van OpenAI");
+  return text;
+}
+
+export async function extractActionItems(
+  transcript: string
+): Promise<Array<{ title: string; assignee?: string; description?: string }>> {
+  const content = await chatText(
+    `Je extraheert gestructureerde data uit transcripten. ${TAAL_NL} Antwoord alleen met JSON als gevraagd.`,
+    `Haal alle actiepunten uit dit vergadertranscript. Geef een JSON-array met objecten: title (verplicht), assignee (optioneel), description (optioneel). Waarden in het Nederlands waar het om taken gaat.
+
+TRANSCRIPT:
+${transcript}
+
+Alleen geldige JSON, geen andere tekst.`,
+    1024
+  );
+
+  try {
+    const cleaned = content.replace(/```json\n?|\n?```/g, "").trim();
+    return JSON.parse(cleaned) as Array<{ title: string; assignee?: string; description?: string }>;
+  } catch {
+    return [];
+  }
+}
+
+export async function generateTitle(transcript: string): Promise<string> {
+  const response = await openai.chat.completions.create({
+    model: TITLE_MODEL,
+    max_tokens: 100,
+    messages: [
+      {
+        role: "user",
+        content: `Bedenk een korte, duidelijke titel (5–8 woorden) voor deze vergadering op basis van het transcript. Alleen de titel, verder niets. Nederlands.
+
+TRANSCRIPT (eerste 500 tekens):
+${transcript.slice(0, 500)}`,
+      },
+    ],
+  });
+  const text = response.choices[0]?.message?.content?.trim().replace(/^["']|["']$/g, "");
+  return text || "Naamloze meeting";
+}

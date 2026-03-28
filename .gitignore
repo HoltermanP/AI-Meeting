@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# lokale SQLite (ontwikkeling)
+*.db
+
+/src/generated/prisma
+
+# Geüploade Word-sjablonen (lokaal)
+/uploads
