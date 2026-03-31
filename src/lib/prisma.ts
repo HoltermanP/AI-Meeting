@@ -64,6 +64,22 @@ function createPrisma() {
   return new PrismaClient({ adapter });
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrisma();
+function getPrisma(): PrismaClient {
+  globalForPrisma.prisma ??= createPrisma();
+  return globalForPrisma.prisma;
+}
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+/**
+ * Lazy client: tijdens `next build` worden routes soms geladen zonder echte DB-aanroep.
+ * Eager `createPrisma()` zou dan al op een verkeerde Vercel DATABASE_URL (bv. Postgres) crashen.
+ */
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, prop, receiver) {
+    const client = getPrisma();
+    const value = Reflect.get(client, prop, receiver);
+    if (typeof value === "function") {
+      return value.bind(client);
+    }
+    return value;
+  },
+}) as PrismaClient;
