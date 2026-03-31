@@ -47,3 +47,6 @@ next-env.d.ts
 
 # Geüploade Word-sjablonen (lokaal)
 /uploads
+
+# clerk configuration (can include secrets)
+/.clerk/
