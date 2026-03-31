@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import MainLayout from "@/components/layout/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,13 +36,11 @@ type Template = {
   userId: string;
 };
 
-type MeUser = { id: string; email: string; name: string | null };
-
 export default function SettingsPage() {
-  const [me, setMe] = useState<MeUser | null>(null);
+  const { data: session } = useSession();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [name, setName] = useState("");
+  const [name, setName] = useState(session?.user?.name || "");
   const [openaiKey, setOpenaiKey] = useState("");
 
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -57,18 +56,6 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadTemplates();
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { user?: MeUser } | null) => {
-        if (data?.user) {
-          setMe(data.user);
-          setName(data.user.name || "");
-        }
-      })
-      .catch(() => {});
   }, []);
 
   async function loadTemplates() {
@@ -125,7 +112,7 @@ export default function SettingsPage() {
   }
 
   function openEdit(t: Template) {
-    if (t.userId !== me?.id) return;
+    if (t.userId !== session?.user?.id) return;
     setEditing(t);
     setFormName(t.name);
     setFormDescription(t.description || "");
@@ -192,7 +179,7 @@ export default function SettingsPage() {
   }
 
   async function deleteTemplate(t: Template) {
-    if (t.userId !== me?.id) return;
+    if (t.userId !== session?.user?.id) return;
     if (!confirm(`Template "${t.name}" verwijderen?`)) return;
     await fetch(`/api/templates/${t.id}`, { method: "DELETE" });
     await loadTemplates();
@@ -206,7 +193,7 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 2000);
   }
 
-  const ownTemplates = templates.filter((t) => t.userId === me?.id);
+  const ownTemplates = templates.filter((t) => t.userId === session?.user?.id);
 
   return (
     <MainLayout title="Instellingen">
@@ -226,7 +213,7 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-1.5">
               <Label>E-mail</Label>
-              <Input value={me?.email || ""} disabled className="bg-muted" />
+              <Input value={session?.user?.email || ""} disabled className="bg-muted" />
             </div>
           </CardContent>
         </Card>
@@ -267,7 +254,7 @@ export default function SettingsPage() {
                 <p className="font-medium">Templates laden lukt niet</p>
                 <p>{templatesError}</p>
                 <p className="text-xs text-amber-800">
-                  Vaak na een lege database of ontbrekende sessie: opnieuw inloggen via Clerk. Controleer ook{" "}
+                  Vaak na een lege database of ontbrekende sessie: opnieuw inloggen. Controleer ook{" "}
                   <code className="bg-amber-100 px-1 rounded">DATABASE_URL</code> in{" "}
                   <code className="bg-amber-100 px-1 rounded">.env</code>.
                 </p>

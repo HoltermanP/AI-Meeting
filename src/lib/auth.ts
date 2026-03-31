@@ -1,73 +1,55 @@
-import { auth as clerkAuth, currentUser } from "@clerk/nextjs/server";
-import type { User } from "@prisma/client";
+import NextAuth from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
+import bcrypt from "bcryptjs";
+import { z } from "zod";
 import { prisma } from "./prisma";
 
-/** Prisma-user gekoppeld aan de huidige Clerk-sessie (aanmaken of mergen op e-mail). */
-export async function getSessionUser(): Promise<User | null> {
-  const { userId } = await clerkAuth();
-  if (!userId) return null;
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+});
 
-  let user = await prisma.user.findUnique({ where: { clerkId: userId } });
-  if (user) return user;
-
-  const cu = await currentUser();
-  if (!cu) return null;
-
-  const primaryEmail =
-    cu.emailAddresses.find((e) => e.id === cu.primaryEmailAddressId)?.emailAddress ??
-    cu.emailAddresses[0]?.emailAddress;
-  if (!primaryEmail) return null;
-
-  const existingByEmail = await prisma.user.findUnique({
-    where: { email: primaryEmail },
-  });
-  if (existingByEmail) {
-    return prisma.user.update({
-      where: { id: existingByEmail.id },
-      data: {
-        clerkId: userId,
-        image: cu.imageUrl ?? existingByEmail.image,
-        name:
-          [cu.firstName, cu.lastName].filter(Boolean).join(" ") ||
-          existingByEmail.name ||
-          cu.username ||
-          null,
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  session: { strategy: "jwt" },
+  pages: {
+    signIn: "/auth/login",
+  },
+  providers: [
+    CredentialsProvider({
+      name: "credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
       },
-    });
-  }
+      async authorize(credentials) {
+        const parsed = loginSchema.safeParse(credentials);
+        if (!parsed.success) return null;
 
-  const name =
-    [cu.firstName, cu.lastName].filter(Boolean).join(" ") || cu.username || null;
+        const user = await prisma.user.findUnique({
+          where: { email: parsed.data.email },
+        });
+        if (!user || !user.password) return null;
 
-  return prisma.user.create({
-    data: {
-      clerkId: userId,
-      email: primaryEmail,
-      name,
-      image: cu.imageUrl ?? null,
+        const valid = await bcrypt.compare(parsed.data.password, user.password);
+        if (!valid) return null;
+
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          image: user.image,
+        };
+      },
+    }),
+  ],
+  callbacks: {
+    jwt({ token, user }) {
+      if (user) token.id = user.id;
+      return token;
     },
-  });
-}
-
-export type AppSession = {
-  user: {
-    id: string;
-    email: string;
-    name: string | null;
-    image: string | null;
-  };
-};
-
-/** Zelfde vorm als voorheen (NextAuth), zodat API-routes minimaal wijzigen. */
-export async function auth(): Promise<AppSession | null> {
-  const user = await getSessionUser();
-  if (!user) return null;
-  return {
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      image: user.image,
+    session({ session, token }) {
+      if (token.id) session.user.id = token.id as string;
+      return session;
     },
-  };
-}
+  },
+});

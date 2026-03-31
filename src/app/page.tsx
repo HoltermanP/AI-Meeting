@@ -9,7 +9,7 @@ import { Mic, FileText, CheckSquare, Clock } from "lucide-react";
 
 export default async function DashboardPage() {
   const session = await auth();
-  if (!session?.user?.id) redirect("/sign-in");
+  if (!session?.user?.id) redirect("/auth/login");
 
   const userId = session.user.id;
 
