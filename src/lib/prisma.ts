@@ -10,27 +10,36 @@ function createPrisma() {
   const envUrl =
     process.env.DATABASE_URL?.trim() || process.env.TURSO_DATABASE_URL?.trim();
 
-  if (process.env.VERCEL && !envUrl) {
+  const isVercelLike =
+    process.env.VERCEL === "1" ||
+    process.env.VERCEL === "true" ||
+    Boolean(process.env.VERCEL_ENV);
+
+  if (isVercelLike && !envUrl) {
     throw new Error(
       "DATABASE_URL (of TURSO_DATABASE_URL) ontbreekt. Voeg in Vercel Project Settings een libsql-URL toe (bv. Turso) en voer migraties uit tegen die database.",
     );
   }
 
+  if (envUrl) {
+    const u = envUrl.toLowerCase();
+    if (u.startsWith("postgres://") || u.startsWith("postgresql://")) {
+      throw new Error(
+        "DATABASE_URL is een PostgreSQL-URL, maar deze app gebruikt Prisma met SQLite via libsql (Turso). Zet je Turso/libsql connection string in DATABASE_URL (of TURSO_DATABASE_URL), niet Neon/Supabase Postgres.",
+      );
+    }
+  }
+
   const rawUrl = envUrl || "file:./prisma/dev.db";
   let url = rawUrl;
 
-  // Sommige Postgres-georiënteerde connectionstrings bevatten query-params
-  // (zoals sslmode/channel_binding) die libsql/Turso niet ondersteunt.
-  // Daarom strippen we voor libsql-achtige URL's alle query-params.
+  // Sommige connectionstrings bevatten query-params (zoals sslmode/channel_binding)
+  // die de libsql-adapter niet ondersteunt. Daarom strippen we alle query-params
+  // voor elke niet-file URL.
   try {
     const parsed = new URL(rawUrl);
-    const isLibsqlLike =
-      /^libsql:/i.test(parsed.protocol) ||
-      /^https:/i.test(parsed.protocol) ||
-      /^wss?:/i.test(parsed.protocol) ||
-      /\.turso\.io$/i.test(parsed.hostname);
-
-    if (isLibsqlLike && parsed.search) {
+    const isFile = /^file:/i.test(parsed.protocol);
+    if (!isFile && parsed.search) {
       parsed.search = "";
       url = parsed.toString();
     }
@@ -42,7 +51,7 @@ function createPrisma() {
 
   const needsLibsqlAuth =
     /^libsql:\/\//i.test(url) || /\.turso\.io/i.test(url);
-  if (process.env.VERCEL && needsLibsqlAuth && !authToken?.trim()) {
+  if (isVercelLike && needsLibsqlAuth && !authToken?.trim()) {
     throw new Error(
       "DATABASE_AUTH_TOKEN of TURSO_AUTH_TOKEN ontbreekt. Voeg het Turso-token toe in Vercel (zelfde als bij `turso db tokens create`).",
     );
