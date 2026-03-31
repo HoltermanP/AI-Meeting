@@ -8,10 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type Props = {
   open: boolean;
   onClose: () => void;
+  /** Bijv. vanuit /meetings?projectId=… — vooraf geselecteerd project */
+  defaultProjectId?: string | null;
 };
 
 const PLATFORMS = [
@@ -23,15 +26,21 @@ const PLATFORMS = [
   { value: "other", label: "Other / In-person" },
 ];
 
-export default function NewMeetingDialog({ open, onClose }: Props) {
+export default function NewMeetingDialog({ open, onClose, defaultProjectId }: Props) {
   const router = useRouter();
   const [title, setTitle] = useState("Naamloze meeting");
   const [platform, setPlatform] = useState("other");
   const [templateId, setTemplateId] = useState<string>("");
+  const [projectId, setProjectId] = useState<string>("");
   const [templates, setTemplates] = useState<
     { id: string; name: string; userId: string }[]
   >([]);
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
+  const [projectActions, setProjectActions] = useState<
+    { id: string; title: string; completed: boolean }[]
+  >([]);
+  const [loadingProjectActions, setLoadingProjectActions] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -39,7 +48,29 @@ export default function NewMeetingDialog({ open, onClose }: Props) {
       .then((r) => r.json())
       .then((list) => setTemplates(Array.isArray(list) ? list : []))
       .catch(() => setTemplates([]));
+    fetch("/api/projects")
+      .then((r) => r.json())
+      .then((list) => setProjects(Array.isArray(list) ? list : []))
+      .catch(() => setProjects([]));
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setProjectId(defaultProjectId || "");
+  }, [open, defaultProjectId]);
+
+  useEffect(() => {
+    if (!open || !projectId) {
+      setProjectActions([]);
+      return;
+    }
+    setLoadingProjectActions(true);
+    fetch(`/api/projects/${projectId}/action-items`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setProjectActions(Array.isArray(data) ? data : []))
+      .catch(() => setProjectActions([]))
+      .finally(() => setLoadingProjectActions(false));
+  }, [open, projectId]);
 
   async function handleCreate() {
     setLoading(true);
@@ -51,6 +82,7 @@ export default function NewMeetingDialog({ open, onClose }: Props) {
           title,
           platform,
           ...(templateId ? { templateId } : {}),
+          ...(projectId ? { projectId } : {}),
         }),
       });
       const meeting = await res.json();
@@ -76,6 +108,57 @@ export default function NewMeetingDialog({ open, onClose }: Props) {
               onChange={(e) => setTitle(e.target.value)}
               placeholder="bijv. Teamsync, klantgesprek"
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Project</Label>
+            <Select
+              value={projectId || "__none__"}
+              onValueChange={(v) => setProjectId(v === "__none__" ? "" : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Kies project" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Geen project (losse meeting)</SelectItem>
+                {projects.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Koppel deze meeting aan een project, of laat leeg voor een standalone meeting.
+            </p>
+            {projectId ? (
+              <div className="rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                <p className="text-xs font-medium text-muted-foreground mb-2">Actielijst van dit project</p>
+                {loadingProjectActions ? (
+                  <div className="flex justify-center py-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
+                  </div>
+                ) : projectActions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Nog geen actiepunten. Na aanmaken zie je hier dezelfde lijst als in andere meetings van dit
+                    project.
+                  </p>
+                ) : (
+                  <ul className="max-h-36 space-y-1 overflow-y-auto text-sm text-foreground">
+                    {projectActions.map((a) => (
+                      <li
+                        key={a.id}
+                        className={cn(
+                          "truncate border-l-2 border-indigo-200 pl-2",
+                          a.completed && "text-muted-foreground line-through border-muted"
+                        )}
+                      >
+                        {a.title}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : null}
           </div>
           <div className="space-y-1.5">
             <Label>Platform</Label>

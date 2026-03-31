@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
-import { chatCompletion, chatCompletionMulti } from "@/lib/llm";
+import { chatCompletion, chatCompletionMulti, chatCompletionNotesStream } from "@/lib/llm";
 
 /** Whisper-transcriptie blijft via OpenAI (geen Anthropic speech-to-text). */
 export const openai = new OpenAI({
@@ -36,6 +36,9 @@ Geen andere koppen, geen colofon, geen titelregel met datum boven ## Samenvattin
 const AI_KIEST_ACTIES =
   "Er zijn geen vaste regels voor actiepunten: extraheer concrete taken uit het transcript; gebruik per item waar mogelijk title, assignee (eigenaar), description (korte toelichting).";
 
+/** Output cap voor verslag + JSON-acties; ~1500–2000 tokens volstaat meestal. */
+const MEETING_NOTES_MAX_OUTPUT_TOKENS = 2000;
+
 export type GenerateNotesTemplate = {
   reportStructure?: string | null;
   actionItemsInstructions?: string | null;
@@ -43,16 +46,51 @@ export type GenerateNotesTemplate = {
   wordPlaceholderKeys?: string[];
 };
 
-export async function generateMeetingNotes(
+export type GenerateMeetingNotesContext = {
+  /** Namen (en optioneel e-mail) van ingeschreven deelnemers; de AI probeert assignee hierop te matchen. */
+  participants?: Array<{ name: string; email?: string | null }>;
+};
+
+type MeetingNotesPromptBundle = {
+  systemPrompt: string;
+  userPrompt: string;
+  maxTokens: number;
+  hasWordFields: boolean;
+  fillKeys: string[];
+};
+
+function formatParticipantsForPrompt(
+  participants: GenerateMeetingNotesContext["participants"]
+): string {
+  if (!participants?.length) return "";
+  const lines = participants
+    .map((p) => {
+      const name = p.name?.trim();
+      if (!name) return null;
+      const em = p.email?.trim();
+      return em ? `- ${name} (${em})` : `- ${name}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+  if (!lines) return "";
+  return `
+
+BEKENDE DEELNEMERS VAN DEZE MEETING
+${lines}
+
+Regels voor het JSON-veld "assignee" bij elk actiepunt:
+- Lees uit het transcript wie de taak op zich neemt of toegewezen krijgt.
+- Kies waar mogelijk exact één naam uit de lijst hierboven (zelfde schrijfwijze) als eigenaar.
+- Als iemand anders in het transcript wordt genoemd die niet in de lijst staat, gebruik die naam zoals genoemd.
+- Laat "assignee" weg of gebruik null alleen als er geen redelijke eigenaar uit het gesprek volgt.`;
+}
+
+function buildMeetingNotesPrompts(
   transcript: string,
   template?: GenerateNotesTemplate | null,
-  rawNotes?: string
-): Promise<{
-  notes: string;
-  summary: string;
-  actionItems: Array<{ title: string; assignee?: string; description?: string }>;
-  wordPlaceholders?: Record<string, string>;
-}> {
+  rawNotes?: string,
+  context?: GenerateMeetingNotesContext | null
+): MeetingNotesPromptBundle {
   const fillKeys = (template?.wordPlaceholderKeys || []).filter(Boolean);
   const hasWordFields = fillKeys.length > 0;
 
@@ -67,6 +105,8 @@ ${template!.reportStructure}`
   const actionBlock = template?.actionItemsInstructions?.trim()
     ? `Actiepunten — volg strikt deze instructies voor extractie en velden:\n${template.actionItemsInstructions}\n\nLever de actiepunten als JSON-array van objecten met minstens "title"; voeg toe wat de instructies vragen (bijv. assignee, dueDate als tekst, priority).`
     : `${AI_KIEST_ACTIES}\n\nLever een JSON-array van objecten: { "title": string, "assignee"?: string, "description"?: string }.`;
+
+  const participantBlock = formatParticipantsForPrompt(context?.participants);
 
   const wordBlock = hasWordFields
     ? `
@@ -97,6 +137,7 @@ ${actionBlock}`;
 
 TRANSCRIPT:
 ${transcript}
+${participantBlock}
 
 ${rawNotes ? `\nAANVULLENDE NOTITIES VAN DEELNEMER:\n${rawNotes}` : ""}
 
@@ -114,6 +155,7 @@ Voorbeeld:
 
 TRANSCRIPT:
 ${transcript}
+${participantBlock}
 
 ${rawNotes ? `\nAANVULLENDE NOTITIES VAN DEELNEMER:\n${rawNotes}` : ""}
 
@@ -125,13 +167,51 @@ Lever in één antwoord:
 \`\`\`
 Als er geen actiepunten zijn: [].`;
 
-  const content = await chatCompletion(
-    "notes",
+  return {
     systemPrompt,
     userPrompt,
-    hasWordFields ? 8192 : 4096
+    maxTokens: hasWordFields ? 8192 : 4096,
+    hasWordFields,
+    fillKeys,
+  };
+}
+
+export async function generateMeetingNotes(
+  transcript: string,
+  template?: GenerateNotesTemplate | null,
+  rawNotes?: string,
+  context?: GenerateMeetingNotesContext | null,
+  options?: { onStreamDelta?: (text: string) => void }
+): Promise<{
+  notes: string;
+  summary: string;
+  actionItems: Array<{ title: string; assignee?: string; description?: string }>;
+  wordPlaceholders?: Record<string, string>;
+}> {
+  const { systemPrompt, userPrompt, maxTokens, hasWordFields, fillKeys } = buildMeetingNotesPrompts(
+    transcript,
+    template,
+    rawNotes,
+    context
   );
 
+  const content = options?.onStreamDelta
+    ? await chatCompletionNotesStream(systemPrompt, userPrompt, maxTokens, options.onStreamDelta)
+    : await chatCompletion("notes", systemPrompt, userPrompt, maxTokens);
+
+  return parseGeneratedMeetingNotesContent(content, hasWordFields, fillKeys);
+}
+
+function parseGeneratedMeetingNotesContent(
+  content: string,
+  hasWordFields: boolean,
+  fillKeys: string[]
+): {
+  notes: string;
+  summary: string;
+  actionItems: Array<{ title: string; assignee?: string; description?: string }>;
+  wordPlaceholders?: Record<string, string>;
+} {
   const jsonBlocks = [...content.matchAll(/```json\n?([\s\S]*?)\n?```/g)].map((x) => x[1].trim());
   let actionItems: Array<{ title: string; assignee?: string; description?: string }> = [];
   let wordPlaceholders: Record<string, string> = {};

@@ -210,7 +210,7 @@ export default function SettingsPage() {
 
   return (
     <MainLayout title="Instellingen">
-      <div className="p-6 max-w-3xl mx-auto space-y-6">
+      <div className="mx-auto max-w-3xl space-y-6 p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:p-6">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -232,10 +232,10 @@ export default function SettingsPage() {
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-start justify-between space-y-0">
-            <div>
+          <CardHeader className="flex flex-col gap-4 space-y-0 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
               <CardTitle className="flex items-center gap-2">
-                <FileStack className="h-5 w-5 text-indigo-600" />
+                <FileStack className="h-5 w-5 shrink-0 text-indigo-600" />
                 Verslag- en actielijst-templates
               </CardTitle>
               <CardDescription className="mt-1.5 max-w-2xl space-y-2">
@@ -256,7 +256,7 @@ export default function SettingsPage() {
                 </p>
               </CardDescription>
             </div>
-            <Button size="sm" className="gap-1 shrink-0" onClick={openNew}>
+            <Button size="sm" className="w-full shrink-0 gap-1 sm:w-auto" onClick={openNew}>
               <Plus className="h-4 w-4" />
               Template toevoegen
             </Button>

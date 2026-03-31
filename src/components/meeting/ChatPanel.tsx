@@ -141,13 +141,13 @@ export default function ChatPanel({ meetingId, initialMessages }: Props) {
         )}
       </ScrollArea>
 
-      <div className="border-t border-gray-100 p-3">
-        <div className="flex gap-2">
+      <div className="border-t border-gray-100 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="flex min-w-0 gap-2">
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Stel een vraag over deze meeting..."
-            className="flex-1"
+            className="min-w-0 flex-1"
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
           />
           <Button

@@ -14,15 +14,24 @@ function createPrisma() {
     Boolean(process.env.VERCEL_ENV);
 
   const connectionString = process.env.DATABASE_URL?.trim();
-  if (isVercelLike && !connectionString) {
-    throw new Error(
-      "DATABASE_URL ontbreekt. Voeg in Vercel de Neon PostgreSQL connection string toe (Project Settings → Environment Variables).",
-    );
-  }
 
   if (!connectionString) {
     throw new Error(
-      "DATABASE_URL ontbreekt. Zet in .env een Neon- of PostgreSQL-connection string (zie Neon-dashboard).",
+      isVercelLike
+        ? "DATABASE_URL ontbreekt. Voeg in Vercel de Neon PostgreSQL connection string toe (Project Settings → Environment Variables)."
+        : "DATABASE_URL ontbreekt. Zet in .env een Neon- of PostgreSQL-connection string (zie Neon-dashboard).",
+    );
+  }
+
+  const looksLikeNeonTemplate =
+    connectionString.includes("HOST.neon.tech") ||
+    connectionString.includes("USER:PASSWORD@") ||
+    /^postgresql:\/\/USER[:@]/i.test(connectionString);
+  if (looksLikeNeonTemplate) {
+    throw new Error(
+      isVercelLike
+        ? "DATABASE_URL lijkt nog een voorbeeld-URI. Vervang in Vercel Environment Variables door de echte connection string uit Neon (Dashboard → Connect)."
+        : "DATABASE_URL is nog een voorbeeld (USER/PASSWORD/HOST). Open Neon → je project → Connect → kopieer de volledige PostgreSQL-URI naar .env en herstart de dev-server.",
     );
   }
 

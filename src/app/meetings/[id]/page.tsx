@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import MainLayout from "@/components/layout/MainLayout";
 import AudioRecorder from "@/components/meeting/AudioRecorder";
@@ -13,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Wand2, Trash2, Download, Loader2, Mic, FileText,
-  CheckSquare, MessageSquare, Edit2, Check, X
+  CheckSquare, MessageSquare, Edit2, Check, X, Briefcase
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -40,6 +41,7 @@ export default function MeetingDetailPage() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportFormat, setExportFormat] = useState<"word" | "pdf">("word");
   const pdfSourceRef = useRef<HTMLDivElement>(null);
+  const emptyActionItems = useMemo(() => [], []);
 
   useEffect(() => {
     loadMeeting();
@@ -79,13 +81,83 @@ export default function MeetingDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rawNotes }),
       });
-      const data = await res.json();
-      setMeeting((m: any) => ({
-        ...m,
-        notes: data.notes,
-        actionItems: data.actionItems,
-        template: data.template ?? m.template,
-      }));
+
+      const contentType = res.headers.get("content-type") || "";
+
+      if (!res.ok && !contentType.includes("text/event-stream")) {
+        let msg = `Notities genereren mislukt (${res.status}).`;
+        try {
+          const errBody = await res.json();
+          if (typeof errBody.error === "string") msg = errBody.error;
+        } catch {
+          /* keep default */
+        }
+        alert(msg);
+        return;
+      }
+
+      /** Tijdens stream: ruwe AI-tekst weglaten zodra het JSON-blok begint (leesbaarder voorvertoning). */
+      const stripIncompleteJsonFence = (s: string) => {
+        const i = s.indexOf("```json");
+        return i === -1 ? s : s.slice(0, i).trimEnd();
+      };
+
+      if (!res.body || !contentType.includes("text/event-stream")) {
+        alert("Geen streaming-reactie van de server. Probeer het opnieuw.");
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let rawAccum = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const chunks = buf.split("\n\n");
+        buf = chunks.pop() ?? "";
+        for (const block of chunks) {
+          const dataLine = block
+            .split("\n")
+            .filter((l) => l.startsWith("data: "))
+            .map((l) => l.slice(6))
+            .join("\n");
+          if (!dataLine.trim()) continue;
+          let payload: { type?: string; text?: string; meeting?: unknown; error?: string };
+          try {
+            payload = JSON.parse(dataLine) as typeof payload;
+          } catch {
+            alert("Ongeldige streamedata van de server.");
+            return;
+          }
+          if (payload.type === "delta" && typeof payload.text === "string") {
+            rawAccum += payload.text;
+            const preview = stripIncompleteJsonFence(rawAccum);
+            setMeeting((m: any) => ({
+              ...m,
+              notes: { ...m?.notes, content: preview },
+            }));
+          } else if (payload.type === "done" && payload.meeting && typeof payload.meeting === "object") {
+            const m = payload.meeting as {
+              notes?: unknown;
+              actionItems?: unknown;
+              template?: unknown;
+            };
+            setMeeting((prev: any) => ({
+              ...prev,
+              ...m,
+              notes: m.notes ?? prev.notes,
+              actionItems: m.actionItems ?? prev.actionItems,
+              template: m.template ?? prev.template,
+            }));
+          } else if (payload.type === "error") {
+            alert(typeof payload.error === "string" ? payload.error : "Notities genereren mislukt.");
+            return;
+          }
+        }
+      }
     } finally {
       setGeneratingNotes(false);
     }
@@ -259,13 +331,13 @@ export default function MeetingDetailPage() {
       )}
       <div className="flex flex-col h-full">
         {/* Header */}
-        <div className="border-b border-gray-200 bg-white px-6 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
+        <div className="border-b border-gray-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
                 <span className="text-xl">{platformIcon(meeting.platform)}</span>
                 {editingTitle ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
                     <input
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
@@ -273,7 +345,7 @@ export default function MeetingDetailPage() {
                         if (e.key === "Enter") saveTitle();
                         if (e.key === "Escape") setEditingTitle(false);
                       }}
-                      className="text-xl font-semibold text-gray-900 border-b-2 border-indigo-500 outline-none bg-transparent flex-1"
+                      className="min-w-0 flex-1 border-b-2 border-indigo-500 bg-transparent text-lg font-semibold text-gray-900 outline-none sm:text-xl"
                       autoFocus
                     />
                     <button onClick={saveTitle} className="text-green-600 hover:text-green-700">
@@ -285,15 +357,15 @@ export default function MeetingDetailPage() {
                   </div>
                 ) : (
                   <h1
-                    className="text-xl font-semibold text-gray-900 cursor-pointer hover:text-indigo-600 transition-colors"
+                    className="cursor-pointer text-lg font-semibold text-gray-900 transition-colors hover:text-indigo-600 sm:text-xl"
                     onClick={() => setEditingTitle(true)}
                   >
                     {meeting.title}
-                    <Edit2 className="inline ml-2 h-3.5 w-3.5 text-gray-400 opacity-0 group-hover:opacity-100" />
+                    <Edit2 className="ml-2 inline h-3.5 w-3.5 text-gray-400 opacity-0 group-hover:opacity-100" />
                   </h1>
                 )}
               </div>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 sm:gap-3">
                 <span>{formatDateTime(meeting.createdAt)}</span>
                 {meeting.duration && <span>{formatDuration(meeting.duration)}</span>}
                 <Badge variant={meeting.status === "completed" ? "success" : "secondary"}>
@@ -303,9 +375,19 @@ export default function MeetingDetailPage() {
                   <Badge variant="warning">{pendingActions} open taken</Badge>
                 )}
               </div>
+              {meeting.project && (
+                <Link
+                  href={`/meetings?projectId=${meeting.project.id}`}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-gray-100"
+                  style={{ color: meeting.project.color }}
+                >
+                  <Briefcase className="h-3.5 w-3.5" />
+                  {meeting.project.name}
+                </Link>
+              )}
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
               {meeting.transcript && !meeting.notes && (
                 <Button
                   onClick={generateNotes}
@@ -318,13 +400,15 @@ export default function MeetingDetailPage() {
                   ) : (
                     <Wand2 className="h-4 w-4" />
                   )}
-                  Notities genereren
+                  <span className="sm:hidden">Notities</span>
+                  <span className="hidden sm:inline">Notities genereren</span>
                 </Button>
               )}
               {meeting.notes && (
                 <Button onClick={generateNotes} disabled={generatingNotes} variant="outline" size="sm" className="gap-2">
                   {generatingNotes ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                  Opnieuw genereren
+                  <span className="inline sm:hidden">Opnieuw</span>
+                  <span className="hidden sm:inline">Opnieuw genereren</span>
                 </Button>
               )}
               {meeting.notes && (
@@ -333,7 +417,7 @@ export default function MeetingDetailPage() {
                     value={exportFormat}
                     onValueChange={(v) => setExportFormat(v as "word" | "pdf")}
                   >
-                    <SelectTrigger className="w-[140px] h-9 text-xs">
+                    <SelectTrigger className="h-9 w-full min-w-0 flex-[1_1_120px] text-xs sm:w-[140px] sm:flex-initial">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -353,21 +437,22 @@ export default function MeetingDetailPage() {
                     ) : (
                       <Download className="h-4 w-4" />
                     )}
-                    Downloaden
+                    Download
                   </Button>
                 </>
               )}
-              <Button onClick={deleteMeeting} variant="outline" size="sm" className="gap-2 text-red-600 hover:text-red-700 hover:border-red-200">
+              <Button onClick={deleteMeeting} variant="outline" size="sm" className="gap-2 text-red-600 hover:border-red-200 hover:text-red-700" title="Verwijderen">
                 <Trash2 className="h-4 w-4" />
+                <span className="hidden sm:inline">Verwijderen</span>
               </Button>
             </div>
           </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-hidden flex gap-0">
+        <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden lg:flex-row">
           {/* Main content */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          <div className="min-w-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
             {/* Recording */}
             {meeting.status !== "completed" && (
               <div>
@@ -387,7 +472,7 @@ export default function MeetingDetailPage() {
                   onValueChange={(v) => saveTemplateChoice(v === "__none__" ? "" : v)}
                   disabled={savingTemplate}
                 >
-                  <SelectTrigger className="bg-white max-w-md">
+                  <SelectTrigger className="max-w-full bg-white sm:max-w-md">
                     <SelectValue placeholder="Template" />
                   </SelectTrigger>
                   <SelectContent>
@@ -443,16 +528,23 @@ export default function MeetingDetailPage() {
               </div>
             )}
 
-            {/* Action Items */}
-            {(meeting.actionItems?.length > 0 || meeting.notes) && (
+            {/* Action Items — bij project: gedeelde projectlijst altijd tonen zodra meeting bestaat */}
+            {(meeting.projectId || meeting.actionItems?.length > 0 || meeting.notes) && (
               <div>
-                <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2">
                   <CheckSquare className="h-4 w-4" /> Actiepunten
                 </h2>
+                {meeting.project && (
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Gedeelde lijst voor project &quot;{meeting.project.name}&quot;. Acties zijn hetzelfde in alle
+                    meetings van dit project.
+                  </p>
+                )}
                 <div className="rounded-xl border border-gray-200 bg-white p-4">
                   <ActionItemsList
                     meetingId={id}
-                    items={meeting.actionItems || []}
+                    items={meeting.actionItems ?? emptyActionItems}
+                    participants={meeting.participants || []}
                     onChange={(items) => setMeeting((m: any) => ({ ...m, actionItems: items }))}
                   />
                 </div>
@@ -462,12 +554,12 @@ export default function MeetingDetailPage() {
 
           {/* Chat sidebar */}
           {meeting.transcript && (
-            <div className="w-80 border-l border-gray-200 bg-white flex flex-col">
-              <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3">
-                <MessageSquare className="h-4 w-4 text-gray-400" />
+            <div className="flex min-h-[min(50vh,28rem)] w-full shrink-0 flex-col border-t border-gray-200 bg-white lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
+              <div className="flex shrink-0 items-center gap-2 border-b border-gray-100 px-4 py-3">
+                <MessageSquare className="h-4 w-4 shrink-0 text-gray-400" />
                 <span className="text-sm font-medium text-gray-700">Chat over meeting</span>
               </div>
-              <div className="flex-1 overflow-hidden">
+              <div className="min-h-0 flex-1 overflow-hidden">
                 <ChatPanel
                   meetingId={id}
                   initialMessages={meeting.chatMessages || []}

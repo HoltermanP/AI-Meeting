@@ -25,8 +25,8 @@ const OPENAI_DEFAULTS: Record<AiTask, string> = {
 };
 
 const ANTHROPIC_DEFAULTS: Record<AiTask, string> = {
-  /** Diep redeneren, lange output — Opus (zie Anthropic docs voor nieuwere snapshots) */
-  notes: env("ANTHROPIC_MODEL_NOTES", "claude-opus-4-6"),
+  /** Lang verslag + JSON — Sonnet (streaming, snelle feedback) */
+  notes: env("ANTHROPIC_MODEL_NOTES", "claude-sonnet-4-6"),
   /** Snelle, nauwkeurige dialoog — Sonnet */
   chat: env("ANTHROPIC_MODEL_CHAT", "claude-sonnet-4-6"),
   /** JSON / extractie — Haiku (snel, goedkoop) */

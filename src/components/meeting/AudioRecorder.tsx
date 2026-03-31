@@ -45,6 +45,10 @@ type Props = {
 /** Systeem-audio = scherm/venster delen (desktop-apps, alles wat uit je speakers komt). Tab = alleen die ene browsertab. Mic = fysiek / headset. */
 export type AudioCaptureMode = "system" | "tab" | "mic";
 
+/** Alleen bij zeer lange opnames MediaRecorder-data periodiek flush’en (anders één blob bij stop). */
+const CHUNK_AFTER_SECONDS = 30 * 60;
+const CHUNK_INTERVAL_MS = 1000;
+
 export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
   const [captureMode, setCaptureMode] = useState<AudioCaptureMode>("system");
   const [state, setState] = useState<RecordingState>("idle");
@@ -71,6 +75,55 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
   const animFrameRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const displayStreamRef = useRef<MediaStream | null>(null);
+  const splitChunkingStartedRef = useRef(false);
+  const chunkRequestIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearChunkRequestInterval = useCallback(() => {
+    if (chunkRequestIntervalRef.current) {
+      clearInterval(chunkRequestIntervalRef.current);
+      chunkRequestIntervalRef.current = null;
+    }
+  }, []);
+
+  const startChunkRequestInterval = useCallback(() => {
+    clearChunkRequestInterval();
+    chunkRequestIntervalRef.current = setInterval(() => {
+      const r = mediaRecorderRef.current;
+      if (r?.state === "recording") {
+        try {
+          r.requestData();
+        } catch {
+          /* ignore */
+        }
+      }
+    }, CHUNK_INTERVAL_MS);
+  }, [clearChunkRequestInterval]);
+
+  /** Na 30 min: periodiek requestData. Kortere opnames: geen timeslice, één blob bij stop. */
+  const maybeStartLongRecordingChunking = useCallback(
+    (recordedSeconds: number) => {
+      const rec = mediaRecorderRef.current;
+      if (!rec || rec.state !== "recording") return;
+
+      if (splitChunkingStartedRef.current) {
+        if (!chunkRequestIntervalRef.current) {
+          startChunkRequestInterval();
+        }
+        return;
+      }
+
+      if (recordedSeconds < CHUNK_AFTER_SECONDS) return;
+
+      splitChunkingStartedRef.current = true;
+      try {
+        rec.requestData();
+      } catch {
+        /* ignore */
+      }
+      startChunkRequestInterval();
+    },
+    [startChunkRequestInterval]
+  );
 
   const startVolumeMonitor = (stream: MediaStream) => {
     const ctx = new AudioContext();
@@ -268,17 +321,21 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
+      splitChunkingStartedRef.current = false;
+      clearChunkRequestInterval();
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      recorder.start(1000);
+      recorder.start();
       setState("recording");
 
       const startTime = Date.now();
       timerRef.current = setInterval(() => {
-        setDuration(Math.floor((Date.now() - startTime) / 1000));
+        const secs = Math.floor((Date.now() - startTime) / 1000);
+        setDuration(secs);
+        maybeStartLongRecordingChunking(secs);
       }, 1000);
 
       startVolumeMonitor(stream);
@@ -305,17 +362,25 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
         setError(msg || "Opname starten mislukt");
       }
     }
-  }, [meetingId, captureMode, getSpeechCtor, startSpeechRecognition]);
+  }, [
+    meetingId,
+    captureMode,
+    getSpeechCtor,
+    startSpeechRecognition,
+    clearChunkRequestInterval,
+    maybeStartLongRecordingChunking,
+  ]);
 
   const pause = useCallback(() => {
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.pause();
+      clearChunkRequestInterval();
       stopSpeechRecognition();
       setState("paused");
       if (timerRef.current) clearInterval(timerRef.current);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     }
-  }, [stopSpeechRecognition]);
+  }, [clearChunkRequestInterval, stopSpeechRecognition]);
 
   const resume = useCallback(() => {
     if (mediaRecorderRef.current?.state === "paused") {
@@ -324,11 +389,13 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       setState("recording");
       const pausedAt = Date.now() - duration * 1000;
       timerRef.current = setInterval(() => {
-        setDuration(Math.floor((Date.now() - pausedAt) / 1000));
+        const secs = Math.floor((Date.now() - pausedAt) / 1000);
+        setDuration(secs);
+        maybeStartLongRecordingChunking(secs);
       }, 1000);
       if (streamRef.current) startVolumeMonitor(streamRef.current);
     }
-  }, [duration, startSpeechRecognition, liveSpeechUserStarted]);
+  }, [duration, startSpeechRecognition, liveSpeechUserStarted, maybeStartLongRecordingChunking]);
 
   const stopAllStreams = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -342,6 +409,7 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
 
     setState("processing");
     if (timerRef.current) clearInterval(timerRef.current);
+    clearChunkRequestInterval();
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
 
     await new Promise<void>((resolve) => {
@@ -390,15 +458,23 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       setError(err instanceof Error ? err.message : "Transcriptie mislukt");
       setState("idle");
     }
-  }, [meetingId, duration, onTranscribed, stopAllStreams, stopSpeechRecognition]);
+  }, [
+    meetingId,
+    duration,
+    onTranscribed,
+    stopAllStreams,
+    stopSpeechRecognition,
+    clearChunkRequestInterval,
+  ]);
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      clearChunkRequestInterval();
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       stopAllStreams();
     };
-  }, [stopAllStreams]);
+  }, [stopAllStreams, clearChunkRequestInterval]);
 
   const modeOptions: {
     value: AudioCaptureMode;

@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { formatDateTime, formatDuration, platformIcon, platformLabel } from "@/lib/utils";
+import { formatDateTime, formatDuration, platformIcon } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { CheckSquare, Clock, Users, Folder } from "lucide-react";
+import { CheckSquare, Clock, Users, Folder, Briefcase } from "lucide-react";
 
 type Meeting = {
   id: string;
@@ -16,11 +16,12 @@ type Meeting = {
   actionItems?: { id: string; completed: boolean }[];
   participants?: { id: string; name: string }[];
   folder?: { id: string; name: string; color: string } | null;
+  project?: { id: string; name: string; color: string } | null;
   transcript?: { id: string } | null;
 };
 
 function StatusBadge({ status }: { status: string }) {
-  const variants: Record<string, string> = {
+  const variants: Record<string, "secondary" | "warning" | "success"> = {
     draft: "secondary",
     recording: "warning",
     processing: "warning",
@@ -33,7 +34,7 @@ function StatusBadge({ status }: { status: string }) {
     completed: "Completed",
   };
   return (
-    <Badge variant={(variants[status] as any) || "secondary"}>
+    <Badge variant={variants[status] ?? "secondary"}>
       {labels[status] || status}
     </Badge>
   );
@@ -60,7 +61,9 @@ export default function MeetingCard({ meeting }: { meeting: Meeting }) {
               </p>
             )}
           </div>
-          <StatusBadge status={meeting.status} />
+          <div className="shrink-0">
+            <StatusBadge status={meeting.status} />
+          </div>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-400">
@@ -84,6 +87,19 @@ export default function MeetingCard({ meeting }: { meeting: Meeting }) {
             <span className="flex items-center gap-1">
               <CheckSquare className="h-3 w-3" />
               {doneItems}/{totalItems} tasks
+            </span>
+          )}
+
+          {meeting.project && (
+            <span
+              className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+              style={{
+                backgroundColor: meeting.project.color + "20",
+                color: meeting.project.color,
+              }}
+            >
+              <Briefcase className="h-3 w-3" />
+              {meeting.project.name}
             </span>
           )}
 

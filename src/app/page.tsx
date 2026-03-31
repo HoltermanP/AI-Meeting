@@ -5,6 +5,7 @@ import MainLayout from "@/components/layout/MainLayout";
 import MeetingCard from "@/components/meeting/MeetingCard";
 import DashboardClient from "./dashboard-client";
 import { formatDuration } from "@/lib/utils";
+import { attachActionItemsToMeetings } from "@/lib/meeting-action-items";
 import { Mic, FileText, CheckSquare, Clock } from "lucide-react";
 
 export default async function DashboardPage() {
@@ -13,14 +14,14 @@ export default async function DashboardPage() {
 
   const userId = session.user.id;
 
-  const [recentMeetings, stats] = await Promise.all([
+  const [recentMeetingsRaw, stats] = await Promise.all([
     prisma.meeting.findMany({
       where: { userId },
       include: {
         notes: { select: { summary: true } },
-        actionItems: { select: { id: true, completed: true } },
         participants: { select: { id: true, name: true } },
         folder: true,
+        project: true,
         transcript: { select: { id: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -29,19 +30,26 @@ export default async function DashboardPage() {
     Promise.all([
       prisma.meeting.count({ where: { userId } }),
       prisma.meeting.count({ where: { userId, status: "completed" } }),
-      prisma.actionItem.count({ where: { meeting: { userId }, completed: false } }),
+      prisma.actionItem.count({
+        where: {
+          completed: false,
+          OR: [{ meeting: { userId } }, { project: { userId } }],
+        },
+      }),
       prisma.meeting.aggregate({ where: { userId, duration: { not: null } }, _sum: { duration: true } }),
     ]),
   ]);
+
+  const recentMeetings = await attachActionItemsToMeetings(recentMeetingsRaw);
 
   const [total, completed, pendingActions, durationAgg] = stats;
   const totalSeconds = durationAgg._sum.duration || 0;
 
   return (
     <MainLayout title="Dashboard">
-      <div className="p-6 max-w-6xl mx-auto">
+      <div className="mx-auto max-w-6xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6">
         {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <StatCard icon={<FileText className="h-5 w-5 text-indigo-600" />} label="Total Meetings" value={total} bg="bg-indigo-50" />
           <StatCard icon={<Mic className="h-5 w-5 text-green-600" />} label="Completed" value={completed} bg="bg-green-50" />
           <StatCard icon={<CheckSquare className="h-5 w-5 text-orange-600" />} label="Pending Tasks" value={pendingActions} bg="bg-orange-50" />
@@ -49,13 +57,13 @@ export default async function DashboardPage() {
         </div>
 
         {/* Recent meetings */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-base font-semibold text-gray-900">Recent Meetings</h2>
           <DashboardClient />
         </div>
 
         {recentMeetings.length === 0 ? (
-          <div className="flex flex-col items-center gap-4 rounded-xl border-2 border-dashed border-gray-200 p-12 text-center">
+          <div className="flex flex-col items-center gap-4 rounded-xl border-2 border-dashed border-gray-200 p-8 text-center sm:p-12">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-50">
               <Mic className="h-8 w-8 text-indigo-400" />
             </div>
@@ -85,12 +93,12 @@ function StatCard({
   bg: string;
 }) {
   return (
-    <div className={`rounded-xl border border-gray-200 bg-white p-4`}>
-      <div className={`mb-3 inline-flex h-10 w-10 items-center justify-center rounded-lg ${bg}`}>
+    <div className={`rounded-xl border border-gray-200 bg-white p-3 sm:p-4`}>
+      <div className={`mb-2 inline-flex h-9 w-9 items-center justify-center rounded-lg sm:mb-3 sm:h-10 sm:w-10 ${bg}`}>
         {icon}
       </div>
-      <p className="text-2xl font-bold text-gray-900">{value}</p>
-      <p className="text-sm text-gray-500 mt-0.5">{label}</p>
+      <p className="text-xl font-bold text-gray-900 sm:text-2xl">{value}</p>
+      <p className="mt-0.5 text-xs text-gray-500 sm:text-sm">{label}</p>
     </div>
   );
 }

@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { attachActionItemsToMeetings } from "@/lib/meeting-action-items";
 import { z } from "zod";
 
 const createSchema = z.object({
   title: z.string().min(1).default("Naamloze meeting"),
   platform: z.string().optional(),
   folderId: z.string().optional(),
+  projectId: z.string().optional(),
   templateId: z.string().optional(),
   participants: z.array(z.object({
     name: z.string(),
@@ -22,12 +24,14 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const search = searchParams.get("search") || "";
   const folderId = searchParams.get("folderId");
+  const projectId = searchParams.get("projectId");
   const status = searchParams.get("status");
 
   const meetings = await prisma.meeting.findMany({
     where: {
       userId: session.user.id,
       ...(folderId ? { folderId } : {}),
+      ...(projectId ? { projectId } : {}),
       ...(status ? { status } : {}),
       ...(search ? {
         OR: [
@@ -39,15 +43,16 @@ export async function GET(req: Request) {
     },
     include: {
       notes: { select: { summary: true } },
-      actionItems: { select: { id: true, completed: true } },
       participants: true,
       folder: true,
+      project: true,
       transcript: { select: { id: true } },
     },
     orderBy: { createdAt: "desc" },
   });
 
-  return NextResponse.json(meetings);
+  const withActions = await attachActionItemsToMeetings(meetings);
+  return NextResponse.json(withActions);
 }
 
 export async function POST(req: Request) {
@@ -68,11 +73,20 @@ export async function POST(req: Request) {
     if (!tpl) templateId = undefined;
   }
 
+  let projectId = data.projectId;
+  if (projectId) {
+    const proj = await prisma.project.findFirst({
+      where: { id: projectId, userId: session.user.id },
+    });
+    if (!proj) projectId = undefined;
+  }
+
   const meeting = await prisma.meeting.create({
     data: {
       title: data.title,
       platform: data.platform,
       folderId: data.folderId,
+      projectId: projectId ?? undefined,
       templateId: templateId ?? undefined,
       userId: session.user.id,
       participants: data.participants ? {
@@ -82,6 +96,7 @@ export async function POST(req: Request) {
     include: {
       participants: true,
       folder: true,
+      project: true,
     },
   });
 

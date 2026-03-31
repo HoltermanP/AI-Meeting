@@ -1,7 +1,12 @@
 "use client";
 
-import { Suspense } from "react";
-import { useEffect, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useState,
+  type ComponentProps,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import MainLayout from "@/components/layout/MainLayout";
 import MeetingCard from "@/components/meeting/MeetingCard";
@@ -11,35 +16,41 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Search, Loader2 } from "lucide-react";
 
+type MeetingRow = ComponentProps<typeof MeetingCard>["meeting"];
+
 function MeetingsContent() {
   const searchParams = useSearchParams();
-  const [meetings, setMeetings] = useState<any[]>([]);
+  const [meetings, setMeetings] = useState<MeetingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState(searchParams.get("search") || "");
   const [status, setStatus] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const folderId = searchParams.get("folderId");
+  const projectId = searchParams.get("projectId");
 
-  useEffect(() => {
-    loadMeetings();
-  }, [search, status, folderId]);
-
-  async function loadMeetings() {
+  const loadMeetings = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (status !== "all") params.set("status", status);
     if (folderId) params.set("folderId", folderId);
+    if (projectId) params.set("projectId", projectId);
 
     const data = await fetch(`/api/meetings?${params}`).then((r) => r.json());
     setMeetings(Array.isArray(data) ? data : []);
     setLoading(false);
-  }
+  }, [search, status, folderId, projectId]);
+
+  useEffect(() => {
+    /* Data ophalen bij filterwijziging */
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async loadMeetings; eerste setLoading is noodzakelijk voor loading-UI
+    void loadMeetings();
+  }, [loadMeetings]);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+    <div className="mx-auto max-w-6xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
           <Input
@@ -50,7 +61,7 @@ function MeetingsContent() {
           />
         </div>
         <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-40">
+          <SelectTrigger className="h-10 w-full sm:w-40">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
@@ -59,7 +70,7 @@ function MeetingsContent() {
             <SelectItem value="completed">Completed</SelectItem>
           </SelectContent>
         </Select>
-        <Button onClick={() => setDialogOpen(true)} className="gap-2 shrink-0">
+        <Button onClick={() => setDialogOpen(true)} className="h-10 shrink-0 gap-2 sm:w-auto">
           <Plus className="h-4 w-4" />
           New Meeting
         </Button>
@@ -82,7 +93,11 @@ function MeetingsContent() {
         </div>
       )}
 
-      <NewMeetingDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+      <NewMeetingDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        defaultProjectId={projectId}
+      />
     </div>
   );
 }

@@ -10,6 +10,10 @@ body {
   color: var(--foreground);
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 /* Prose / HTML-notities (editor + PDF-bron) */
 .prose h1 { font-size: 1.5rem; font-weight: 700; margin: 1.25rem 0 0.5rem; color: #0f172a; letter-spacing: -0.02em; }
 .prose h2 { font-size: 1.2rem; font-weight: 600; margin: 1rem 0 0.5rem; color: #1e293b; }
