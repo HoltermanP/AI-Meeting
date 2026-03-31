@@ -19,12 +19,19 @@ function createPrisma() {
   const rawUrl = envUrl || "file:./prisma/dev.db";
   let url = rawUrl;
 
-  // Sommige Postgres-georiënteerde connectionstrings bevatten `sslmode`.
-  // libsql/Turso ondersteunt deze query-parameter niet.
+  // Sommige Postgres-georiënteerde connectionstrings bevatten query-params
+  // (zoals sslmode/channel_binding) die libsql/Turso niet ondersteunt.
+  // Daarom strippen we voor libsql-achtige URL's alle query-params.
   try {
     const parsed = new URL(rawUrl);
-    if (parsed.searchParams.has("sslmode")) {
-      parsed.searchParams.delete("sslmode");
+    const isLibsqlLike =
+      /^libsql:/i.test(parsed.protocol) ||
+      /^https:/i.test(parsed.protocol) ||
+      /^wss?:/i.test(parsed.protocol) ||
+      /\.turso\.io$/i.test(parsed.hostname);
+
+    if (isLibsqlLike && parsed.search) {
+      parsed.search = "";
       url = parsed.toString();
     }
   } catch {
