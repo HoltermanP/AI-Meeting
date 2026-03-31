@@ -7,13 +7,16 @@ const globalForPrisma = globalThis as unknown as {
 
 function createPrisma() {
   // Op Vercel/serverless is een lokaal file:-pad niet bruikbaar; zet DATABASE_URL (bv. Turso libsql://…).
-  if (process.env.VERCEL && !process.env.DATABASE_URL?.trim()) {
+  const envUrl =
+    process.env.DATABASE_URL?.trim() || process.env.TURSO_DATABASE_URL?.trim();
+
+  if (process.env.VERCEL && !envUrl) {
     throw new Error(
-      "DATABASE_URL ontbreekt. Voeg in Vercel Project Settings een libsql-URL toe (bv. Turso) en voer migraties uit tegen die database.",
+      "DATABASE_URL (of TURSO_DATABASE_URL) ontbreekt. Voeg in Vercel Project Settings een libsql-URL toe (bv. Turso) en voer migraties uit tegen die database.",
     );
   }
 
-  const url = process.env.DATABASE_URL || "file:./prisma/dev.db";
+  const url = envUrl || "file:./prisma/dev.db";
   const authToken =
     process.env.DATABASE_AUTH_TOKEN ?? process.env.TURSO_AUTH_TOKEN;
 

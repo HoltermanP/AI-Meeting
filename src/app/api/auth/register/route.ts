@@ -29,6 +29,7 @@ export async function POST(req: Request) {
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: err.issues }, { status: 400 });
     }
+    console.error("[api/auth/register] onverwachte fout", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
