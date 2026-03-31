@@ -1,66 +1,40 @@
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
+import { Pool } from "pg";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
+  pgPool: Pool | undefined;
 };
 
 function createPrisma() {
-  // Op Vercel/serverless is een lokaal file:-pad niet bruikbaar; zet DATABASE_URL (bv. Turso libsql://…).
-  const envUrl =
-    process.env.DATABASE_URL?.trim() || process.env.TURSO_DATABASE_URL?.trim();
-
   const isVercelLike =
     process.env.VERCEL === "1" ||
     process.env.VERCEL === "true" ||
     Boolean(process.env.VERCEL_ENV);
 
-  if (isVercelLike && !envUrl) {
+  const connectionString = process.env.DATABASE_URL?.trim();
+  if (isVercelLike && !connectionString) {
     throw new Error(
-      "DATABASE_URL (of TURSO_DATABASE_URL) ontbreekt. Voeg in Vercel Project Settings een libsql-URL toe (bv. Turso) en voer migraties uit tegen die database.",
+      "DATABASE_URL ontbreekt. Voeg in Vercel de Neon PostgreSQL connection string toe (Project Settings → Environment Variables).",
     );
   }
 
-  if (envUrl) {
-    const u = envUrl.toLowerCase();
-    if (u.startsWith("postgres://") || u.startsWith("postgresql://")) {
-      throw new Error(
-        "DATABASE_URL is een PostgreSQL-URL, maar deze app gebruikt Prisma met SQLite via libsql (Turso). Zet je Turso/libsql connection string in DATABASE_URL (of TURSO_DATABASE_URL), niet Neon/Supabase Postgres.",
-      );
-    }
-  }
-
-  const rawUrl = envUrl || "file:./prisma/dev.db";
-  let url = rawUrl;
-
-  // Sommige connectionstrings bevatten query-params (zoals sslmode/channel_binding)
-  // die de libsql-adapter niet ondersteunt. Daarom strippen we alle query-params
-  // voor elke niet-file URL.
-  try {
-    const parsed = new URL(rawUrl);
-    const isFile = /^file:/i.test(parsed.protocol);
-    if (!isFile && parsed.search) {
-      parsed.search = "";
-      url = parsed.toString();
-    }
-  } catch {
-    // file:-URL's of niet-standaard URL's laten we ongewijzigd.
-  }
-  const authToken =
-    process.env.DATABASE_AUTH_TOKEN ?? process.env.TURSO_AUTH_TOKEN;
-
-  const needsLibsqlAuth =
-    /^libsql:\/\//i.test(url) || /\.turso\.io/i.test(url);
-  if (isVercelLike && needsLibsqlAuth && !authToken?.trim()) {
+  if (!connectionString) {
     throw new Error(
-      "DATABASE_AUTH_TOKEN of TURSO_AUTH_TOKEN ontbreekt. Voeg het Turso-token toe in Vercel (zelfde als bij `turso db tokens create`).",
+      "DATABASE_URL ontbreekt. Zet in .env een Neon- of PostgreSQL-connection string (zie Neon-dashboard).",
     );
   }
 
-  const adapter = new PrismaLibSql({
-    url,
-    ...(authToken ? { authToken } : {}),
-  });
+  const pool =
+    globalForPrisma.pgPool ??
+    new Pool({
+      connectionString,
+      max: isVercelLike ? 1 : undefined,
+    });
+  globalForPrisma.pgPool = pool;
+
+  const adapter = new PrismaPg(pool);
   return new PrismaClient({ adapter });
 }
 
@@ -71,7 +45,7 @@ function getPrisma(): PrismaClient {
 
 /**
  * Lazy client: tijdens `next build` worden routes soms geladen zonder echte DB-aanroep.
- * Eager `createPrisma()` zou dan al op een verkeerde Vercel DATABASE_URL (bv. Postgres) crashen.
+ * Zo wordt geen pool geopend totdat er daadwerkelijk iets op de client wordt aangeroepen.
  */
 export const prisma = new Proxy({} as PrismaClient, {
   get(_target, prop, receiver) {
