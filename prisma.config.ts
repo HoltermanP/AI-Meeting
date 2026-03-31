@@ -8,7 +8,11 @@ export default defineConfig({
   migrations: {
     path: "prisma/migrations",
   },
+  // Migraties moeten via een directe Postgres-verbinding (geen pooler): advisory locks werken niet betrouwbaar via Neon pooler.
+  // Zet DIRECT_URL in Vercel/Neon (Connection string zonder "-pooler"); DATABASE_URL blijft de pooler-URL voor de runtime.
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url:
+      process.env["DIRECT_URL"]?.trim() ||
+      process.env["DATABASE_URL"]?.trim(),
   },
 });
