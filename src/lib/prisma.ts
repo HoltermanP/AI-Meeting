@@ -16,7 +16,20 @@ function createPrisma() {
     );
   }
 
-  const url = envUrl || "file:./prisma/dev.db";
+  const rawUrl = envUrl || "file:./prisma/dev.db";
+  let url = rawUrl;
+
+  // Sommige Postgres-georiënteerde connectionstrings bevatten `sslmode`.
+  // libsql/Turso ondersteunt deze query-parameter niet.
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.searchParams.has("sslmode")) {
+      parsed.searchParams.delete("sslmode");
+      url = parsed.toString();
+    }
+  } catch {
+    // file:-URL's of niet-standaard URL's laten we ongewijzigd.
+  }
   const authToken =
     process.env.DATABASE_AUTH_TOKEN ?? process.env.TURSO_AUTH_TOKEN;
 
