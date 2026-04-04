@@ -40,6 +40,10 @@ export type TranscribeResultMeta = {
 type Props = {
   meetingId: string;
   onTranscribed: (transcript: string, title: string, meta?: TranscribeResultMeta) => void;
+  /** Callback voor live spraakherkenning tekst (alleen microfoon) */
+  onLiveTranscript?: (text: string) => void;
+  /** Toon live transcript tijdens opname */
+  isRecording?: boolean;
 };
 
 /** Systeem-audio = scherm/venster delen (desktop-apps, alles wat uit je speakers komt). Tab = alleen die ene browsertab. Mic = fysiek / headset. */
@@ -49,7 +53,7 @@ export type AudioCaptureMode = "system" | "tab" | "mic";
 const CHUNK_AFTER_SECONDS = 30 * 60;
 const CHUNK_INTERVAL_MS = 1000;
 
-export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
+export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscript }: Props) {
   const [captureMode, setCaptureMode] = useState<AudioCaptureMode>("system");
   const [state, setState] = useState<RecordingState>("idle");
   const [duration, setDuration] = useState(0);
@@ -77,6 +81,8 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
   const displayStreamRef = useRef<MediaStream | null>(null);
   const splitChunkingStartedRef = useRef(false);
   const chunkRequestIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamTranscriptIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sentChunksRef = useRef(0);
 
   const clearChunkRequestInterval = useCallback(() => {
     if (chunkRequestIntervalRef.current) {
@@ -158,6 +164,10 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     };
     setSpeechAvailable(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
   }, []);
+
+  useEffect(() => {
+    onLiveTranscript?.(liveSpeechText);
+  }, [liveSpeechText, onLiveTranscript]);
 
   const getSpeechCtor = useCallback((): SpeechRecCtor | null => {
     if (typeof window === "undefined") return null;
@@ -323,12 +333,14 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       chunksRef.current = [];
       splitChunkingStartedRef.current = false;
       clearChunkRequestInterval();
+      sentChunksRef.current = 0;
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      recorder.start();
+      // Elk CHUNK_INTERVAL_MS een dataavailable-event forceren.
+      recorder.start(CHUNK_INTERVAL_MS);
       setState("recording");
 
       const startTime = Date.now();
@@ -347,6 +359,9 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
           setLiveSpeechUserStarted(true);
           startSpeechRecognition(true);
         }
+      } else {
+        /* Streaming transcription para tab/system audio */
+        startStreamTranscription();
       }
 
       await fetch(`/api/meetings/${meetingId}`, {
@@ -371,21 +386,79 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     maybeStartLongRecordingChunking,
   ]);
 
+  const stopAllStreams = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    displayStreamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    displayStreamRef.current = null;
+  }, []);
+
+  const startStreamTranscription = useCallback(() => {
+    if (streamTranscriptIntervalRef.current) return;
+
+    streamTranscriptIntervalRef.current = setInterval(async () => {
+      const rec = mediaRecorderRef.current;
+      const chunks = chunksRef.current;
+
+      // Solo transcribir si no es solo micrófono (donde usamos Web Speech API)
+      if (rec?.state !== "recording" || captureMode === "mic" || chunks.length === 0) {
+        return;
+      }
+
+      const newChunks = chunks.slice(sentChunksRef.current);
+      if (newChunks.length === 0) return;
+
+      try {
+        const mimeType = rec.mimeType || "audio/webm";
+        const blob = new Blob(newChunks, { type: mimeType });
+
+        const formData = new FormData();
+        formData.append("audio", blob);
+        formData.append("mimeType", mimeType);
+        formData.append("isLast", "false");
+
+        const res = await fetch(`/api/meetings/${meetingId}/transcribe-stream`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.transcript) {
+            onLiveTranscript?.(data.transcript);
+          }
+          sentChunksRef.current = chunks.length;
+        }
+      } catch (err) {
+        console.error("Stream transcription error:", err);
+      }
+    }, 8000); // Transcribir cada 8 segundos
+  }, [captureMode, meetingId, onLiveTranscript]);
+
+  const stopStreamTranscription = useCallback(() => {
+    if (streamTranscriptIntervalRef.current) {
+      clearInterval(streamTranscriptIntervalRef.current);
+      streamTranscriptIntervalRef.current = null;
+    }
+  }, []);
+
   const pause = useCallback(() => {
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.pause();
       clearChunkRequestInterval();
+      stopStreamTranscription();
       stopSpeechRecognition();
       setState("paused");
       if (timerRef.current) clearInterval(timerRef.current);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     }
-  }, [clearChunkRequestInterval, stopSpeechRecognition]);
+  }, [clearChunkRequestInterval, stopStreamTranscription, stopSpeechRecognition]);
 
   const resume = useCallback(() => {
     if (mediaRecorderRef.current?.state === "paused") {
       mediaRecorderRef.current.resume();
       if (liveSpeechUserStarted) startSpeechRecognition(false);
+      if (captureMode !== "mic") startStreamTranscription();
       setState("recording");
       const pausedAt = Date.now() - duration * 1000;
       timerRef.current = setInterval(() => {
@@ -395,14 +468,7 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       }, 1000);
       if (streamRef.current) startVolumeMonitor(streamRef.current);
     }
-  }, [duration, startSpeechRecognition, liveSpeechUserStarted, maybeStartLongRecordingChunking]);
-
-  const stopAllStreams = useCallback(() => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    displayStreamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    displayStreamRef.current = null;
-  }, []);
+  }, [duration, startSpeechRecognition, liveSpeechUserStarted, maybeStartLongRecordingChunking, captureMode, startStreamTranscription]);
 
   const stop = useCallback(async () => {
     if (!mediaRecorderRef.current) return;
@@ -410,6 +476,7 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     setState("processing");
     if (timerRef.current) clearInterval(timerRef.current);
     clearChunkRequestInterval();
+    stopStreamTranscription();
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
 
     await new Promise<void>((resolve) => {
@@ -439,20 +506,43 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     }, 500);
 
     try {
-      const res = await fetch(`/api/meetings/${meetingId}/transcribe`, {
-        method: "POST",
-        body: formData,
-      });
-      clearInterval(progressInterval);
-      setProgress(100);
+      // Para tab/sistema: finalizar en endpoint de streaming
+      if (captureMode !== "mic") {
+        const streamFormData = new FormData();
+        streamFormData.append("audio", blob, "recording.webm");
+        streamFormData.append("mimeType", mimeType);
+        streamFormData.append("isLast", "true");
 
-      if (!res.ok) throw new Error("Transcriptie mislukt");
-      const data = await res.json();
-      setLastProvisional(Boolean(data.provisional));
-      setState("done");
-      onTranscribed(data.transcript?.content || "", data.title || "", {
-        provisional: Boolean(data.provisional),
-      });
+        const streamRes = await fetch(`/api/meetings/${meetingId}/transcribe-stream`, {
+          method: "POST",
+          body: streamFormData,
+        });
+        if (!streamRes.ok) throw new Error("Transcriptie mislukt");
+        const streamData = await streamRes.json();
+        
+        clearInterval(progressInterval);
+        setProgress(100);
+        setState("done");
+        onTranscribed(streamData.transcript || "", "", {
+          provisional: false,
+        });
+      } else {
+        // Para micrófono: usar endpoint normal
+        const res = await fetch(`/api/meetings/${meetingId}/transcribe`, {
+          method: "POST",
+          body: formData,
+        });
+        clearInterval(progressInterval);
+        setProgress(100);
+
+        if (!res.ok) throw new Error("Transcriptie mislukt");
+        const data = await res.json();
+        setLastProvisional(Boolean(data.provisional));
+        setState("done");
+        onTranscribed(data.transcript?.content || "", data.title || "", {
+          provisional: Boolean(data.provisional),
+        });
+      }
     } catch (err: unknown) {
       clearInterval(progressInterval);
       setError(err instanceof Error ? err.message : "Transcriptie mislukt");
@@ -465,16 +555,18 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     stopAllStreams,
     stopSpeechRecognition,
     clearChunkRequestInterval,
+    captureMode,
   ]);
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       clearChunkRequestInterval();
+      stopStreamTranscription();
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       stopAllStreams();
     };
-  }, [stopAllStreams, clearChunkRequestInterval]);
+  }, [stopAllStreams, clearChunkRequestInterval, stopStreamTranscription]);
 
   const modeOptions: {
     value: AudioCaptureMode;

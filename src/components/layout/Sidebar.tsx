@@ -136,11 +136,11 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
                   {projects.map((project) => (
                     <Link
                       key={project.id}
-                      href={`/meetings?projectId=${project.id}`}
+                      href={`/projects/${project.id}`}
                       onClick={() => onNavigate?.()}
                       className={cn(
                         "flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors md:py-2",
-                        pathname === "/meetings" && activeProjectId === project.id
+                        pathname === `/projects/${project.id}`
                           ? "bg-indigo-100 text-indigo-700"
                           : "text-gray-600 hover:bg-gray-100",
                       )}

@@ -32,6 +32,7 @@ export default function MeetingDetailPage() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [title, setTitle] = useState("");
   const [rawNotes, setRawNotes] = useState("");
+  const [liveTranscript, setLiveTranscript] = useState("");
   const [templates, setTemplates] = useState<
     { id: string; name: string; docxPath?: string | null }[]
   >([]);
@@ -266,6 +267,7 @@ export default function MeetingDetailPage() {
 
   const onTranscribed = useCallback(
     (transcript: string, newTitle: string, meta?: { provisional?: boolean }) => {
+      setLiveTranscript(""); // Clear live transcript when recording stops
       setMeeting((m: any) => ({
         ...m,
         status: "completed",
@@ -459,7 +461,11 @@ export default function MeetingDetailPage() {
                 <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                   <Mic className="h-4 w-4" /> Opname
                 </h2>
-                <AudioRecorder meetingId={id} onTranscribed={onTranscribed} />
+                <AudioRecorder 
+                  meetingId={id} 
+                  onTranscribed={onTranscribed}
+                  onLiveTranscript={setLiveTranscript}
+                />
               </div>
             )}
 
@@ -504,12 +510,13 @@ export default function MeetingDetailPage() {
             )}
 
             {/* Transcript */}
-            {meeting.transcript && (
+            {(meeting.transcript || liveTranscript) && (
               <div>
                 <TranscriptView
-                  content={meeting.transcript.content}
-                  segments={segments}
-                  isProvisional={Boolean(meeting.transcript.isProvisional)}
+                  content={liveTranscript || meeting.transcript?.content || ""}
+                  segments={meeting.transcript ? segments : []}
+                  isProvisional={Boolean(liveTranscript || meeting.transcript?.isProvisional)}
+                  isLive={Boolean(liveTranscript && meeting.status !== "completed")}
                 />
               </div>
             )}

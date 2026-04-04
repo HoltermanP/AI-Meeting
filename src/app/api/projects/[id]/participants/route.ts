@@ -12,11 +12,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const items = await prisma.actionItem.findMany({
+  const participants = await prisma.projectParticipant.findMany({
     where: { projectId },
     orderBy: { createdAt: "asc" },
   });
-  return NextResponse.json(items);
+  return NextResponse.json(participants);
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -30,18 +30,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body = await req.json();
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) {
+    return NextResponse.json({ error: "Naam verplicht" }, { status: 400 });
+  }
 
-  const item = await prisma.actionItem.create({
+  const participant = await prisma.projectParticipant.create({
     data: {
       projectId,
-      title: body.title,
-      assignee: body.assignee,
-      description: body.description,
-      dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
+      name,
+      email: body.email || undefined,
+      role: body.role || undefined,
     },
   });
 
-  return NextResponse.json(item, { status: 201 });
+  return NextResponse.json(participant, { status: 201 });
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -55,35 +58,19 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body = await req.json();
+  const { participantId, ...updateData } = body;
 
-  const item = await prisma.actionItem.findFirst({
+  const participant = await prisma.projectParticipant.findFirst({
     where: {
-      id: body.itemId,
+      id: participantId,
       projectId: projectId,
     },
   });
-  if (!item) return NextResponse.json({ error: "Action item not found" }, { status: 404 });
+  if (!participant) return NextResponse.json({ error: "Participant not found" }, { status: 404 });
 
-  const data: {
-    title?: string;
-    assignee?: string | null;
-    completed?: boolean;
-    dueDate?: Date | null;
-    description?: string | null;
-  } = {};
-  if (typeof body.title === "string") data.title = body.title;
-  if (body.assignee !== undefined) data.assignee = body.assignee?.trim?.() ? body.assignee.trim() : null;
-  if (typeof body.completed === "boolean") data.completed = body.completed;
-  if (body.dueDate !== undefined) {
-    data.dueDate = body.dueDate ? new Date(body.dueDate) : null;
-  }
-  if (body.description !== undefined) {
-    data.description = body.description?.trim?.() ? body.description.trim() : null;
-  }
-
-  const updated = await prisma.actionItem.update({
-    where: { id: body.itemId },
-    data,
+  const updated = await prisma.projectParticipant.update({
+    where: { id: participantId },
+    data: updateData,
   });
 
   return NextResponse.json(updated);
@@ -100,21 +87,19 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const body = await req.json();
-  const { itemId } = body;
+  const { participantId } = body;
 
-  const item = await prisma.actionItem.findFirst({
+  const participant = await prisma.projectParticipant.findFirst({
     where: {
-      id: itemId,
+      id: participantId,
       projectId: projectId,
     },
   });
-  if (!item) return NextResponse.json({ error: "Action item not found" }, { status: 404 });
+  if (!participant) return NextResponse.json({ error: "Participant not found" }, { status: 404 });
 
-  await prisma.actionItem.delete({
-    where: { id: itemId },
+  await prisma.projectParticipant.delete({
+    where: { id: participantId },
   });
 
   return NextResponse.json({ success: true });
 }
-
-
