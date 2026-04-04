@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, CalendarDays, Loader2, Wand2, Plus, Trash2, Clock, ArrowLeft } from "lucide-react";
+import { Briefcase, CalendarDays, Loader2, Wand2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import AgendaEditor from "@/components/meeting/AgendaEditor";
 import type { AgendaItem } from "@/components/meeting/AgendaView";
 
 type Project = { id: string; name: string; color: string };
@@ -41,8 +41,6 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const totalMinutes = agendaItems.reduce((s, i) => s + (i.duration || 0), 0);
-
   function selectProject(p: Project) {
     setSelectedProject(p);
     setTitle(`Vergadering – ${p.name}`);
@@ -70,18 +68,6 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
     } finally {
       setGenerating(false);
     }
-  }
-
-  function updateItem(id: string, patch: Partial<AgendaItem>) {
-    setAgendaItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
-  }
-
-  function removeItem(id: string) {
-    setAgendaItems((prev) => prev.filter((i) => i.id !== id));
-  }
-
-  function addItem() {
-    setAgendaItems((prev) => [...prev, { id: String(Date.now()), title: "", notes: "", duration: 10, done: false }]);
   }
 
   async function save() {
@@ -224,55 +210,13 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
           )}
 
           {/* Agenda editor (project + standalone) */}
-          {(mode === "project-agenda" && agendaStep === "edit") || mode === "standalone" ? (
-            <div className="space-y-2">
-              {lastMeetingTitle && (
-                <p className="text-xs text-gray-400">Gebaseerd op: <span className="font-medium text-gray-600">{lastMeetingTitle}</span></p>
-              )}
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  Agenda {agendaItems.length > 0 && `(${agendaItems.length} punten)`}
-                </label>
-                {totalMinutes > 0 && (
-                  <span className="flex items-center gap-1 text-xs text-gray-400">
-                    <Clock className="h-3 w-3" />{totalMinutes} min
-                  </span>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                {agendaItems.map((item, idx) => (
-                  <div key={item.id} className="group flex items-start gap-2 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
-                    <span className="mt-2 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-600">{idx + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <input
-                        value={item.title}
-                        onChange={(e) => updateItem(item.id, { title: e.target.value })}
-                        placeholder="Agendapunt..."
-                        className="w-full bg-transparent text-sm font-medium text-gray-800 focus:outline-none placeholder:text-gray-400"
-                      />
-                    </div>
-                    <div className="flex flex-shrink-0 items-center gap-1">
-                      <input
-                        type="number" min={1} max={120} value={item.duration}
-                        onChange={(e) => updateItem(item.id, { duration: Number(e.target.value) })}
-                        className="w-12 rounded-lg border border-gray-200 bg-white px-1.5 py-1 text-center text-xs text-gray-600 focus:outline-none"
-                      />
-                      <span className="text-[10px] text-gray-400">m</span>
-                      <button onClick={() => removeItem(item.id)} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity ml-1">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <button
-                onClick={addItem}
-                className="flex w-full items-center gap-2 rounded-xl border border-dashed border-gray-200 px-3 py-2 text-xs text-gray-400 hover:border-indigo-200 hover:text-indigo-500 transition-colors"
-              >
-                <Plus className="h-3.5 w-3.5" /> Punt toevoegen
-              </button>
-            </div>
-          ) : null}
+          {((mode === "project-agenda" && agendaStep === "edit") || mode === "standalone") && (
+            <AgendaEditor
+              items={agendaItems}
+              onChange={setAgendaItems}
+              lastMeetingTitle={mode === "project-agenda" ? lastMeetingTitle : null}
+            />
+          )}
         </div>
 
         {/* Footer */}

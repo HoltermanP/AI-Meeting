@@ -45,14 +45,15 @@ ${actielijst}
 
 Maak een agenda voor de volgende vergadering. Geef een JSON-array terug (geen andere tekst), elke item heeft:
 - "id": uniek getal als string
-- "title": agendapunt (bondig)
-- "notes": korte toelichting of context (1-2 zinnen, mag leeg zijn)
+- "title": agendapunt (bondig, max 8 woorden)
+- "notes": uitgebreide toelichting (2-4 zinnen): beschrijf de context, welke beslissing er genomen moet worden of welk resultaat verwacht wordt, en welke relevante actiepunten of informatie uit de vorige vergadering hierop betrekking hebben. Wees concreet en actionable.
 - "duration": geschatte tijd in minuten (getal)
 
-Verplicht eerste punt: opening/check-in (5 min).
-Verplicht laatste punt: rondvraag en afsluiting (5 min).
-Tussenin: review actiepunten vorige keer, en relevante nieuwe onderwerpen op basis van het vorige verslag.
-Maximaal 6-7 punten totaal. Realistisch en concreet.`;
+Verplicht eerste punt: opening/check-in (5 min) – noteer aanwezigen en doel van de vergadering.
+Verplicht tweede punt: review actiepunten vorige vergadering (10 min) – loop alle openstaande punten door en noteer welke concreet besproken moeten worden.
+Verplicht laatste punt: rondvraag en afsluiting (5 min) – samenvatting besluiten, nieuwe actiepunten vastleggen.
+Tussenin: relevante onderwerpen op basis van het vorige verslag, concreet uitgewerkt.
+Maximaal 6-7 punten totaal. Realistisch, concreet en actionable.`;
 
   const raw = await chatCompletion(
     "chat",
