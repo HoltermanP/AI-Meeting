@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { CheckSquare, Square, Plus, Calendar, User, ChevronRight, X, Trash2, AlignLeft, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import {
+  CheckSquare, Square, Plus, Calendar, User, X, Trash2, AlignLeft, Check, ChevronDown,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
@@ -27,17 +28,12 @@ type Props = {
   onChange?: (items: ActionItem[]) => void;
 };
 
-export default function ProjectActionItemsList({
-  projectId,
-  items: initialItems,
-  participants = [],
-  onChange,
-}: Props) {
+export default function ProjectActionItemsList({ projectId, items: initialItems, participants = [], onChange }: Props) {
   const [items, setItems] = useState(initialItems);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [selectedItem, setSelectedItem] = useState<ActionItem | null>(null);
   const [saving, setSaving] = useState(false);
   const debounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -47,30 +43,18 @@ export default function ProjectActionItemsList({
     for (const p of participants) {
       const n = p.name?.trim();
       if (!n) continue;
-      const key = n.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seen.has(n.toLowerCase())) continue;
+      seen.add(n.toLowerCase());
       list.push({ id: p.id, name: n });
     }
     return list;
   }, [participants]);
 
-  useEffect(() => {
-    setItems(initialItems);
-  }, [initialItems]);
-
+  useEffect(() => { setItems(initialItems); }, [initialItems]);
   useEffect(() => {
     const map = debounceRef.current;
     return () => { map.forEach((t) => clearTimeout(t)); };
   }, []);
-
-  // Keep selectedItem in sync with items list
-  useEffect(() => {
-    if (selectedItem) {
-      const updated = items.find((i) => i.id === selectedItem.id);
-      if (updated) setSelectedItem(updated);
-    }
-  }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function saveField(itemId: string, patch: Partial<ActionItem>) {
     const res = await fetch(`/api/projects/${projectId}/action-items`, {
@@ -92,29 +76,34 @@ export default function ProjectActionItemsList({
       const map = debounceRef.current;
       const prev = map.get(itemId);
       if (prev) clearTimeout(prev);
-      const t = setTimeout(() => {
-        map.delete(itemId);
-        void saveField(itemId, patch);
-      }, 500);
+      const t = setTimeout(() => { map.delete(itemId); void saveField(itemId, patch); }, 500);
       map.set(itemId, t);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [projectId, onChange]
   );
 
+  function updateField(itemId: string, patch: Partial<ActionItem>) {
+    setItems((prev) => {
+      const next = prev.map((i) => (i.id === itemId ? { ...i, ...patch } : i));
+      onChange?.(next);
+      return next;
+    });
+    scheduleField(itemId, patch);
+  }
+
   async function toggleItem(id: string, e: React.MouseEvent) {
     e.stopPropagation();
     const item = items.find((i) => i.id === id);
     if (!item) return;
-    const updated = items.map((i) => (i.id === id ? { ...i, completed: !i.completed } : i));
-    setItems(updated);
-    onChange?.(updated);
+    const next = items.map((i) => (i.id === id ? { ...i, completed: !i.completed } : i));
+    setItems(next);
+    onChange?.(next);
     await fetch(`/api/projects/${projectId}/action-items`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ itemId: id, completed: !item.completed }),
     });
-    if (selectedItem?.id === id) setSelectedItem((s) => s ? { ...s, completed: !s.completed } : s);
   }
 
   async function deleteItem(id: string) {
@@ -126,10 +115,10 @@ export default function ProjectActionItemsList({
         body: JSON.stringify({ itemId: id }),
       });
       if (res.ok) {
-        const updated = items.filter((i) => i.id !== id);
-        setItems(updated);
-        onChange?.(updated);
-        if (selectedItem?.id === id) setSelectedItem(null);
+        const next = items.filter((i) => i.id !== id);
+        setItems(next);
+        onChange?.(next);
+        if (expandedId === id) setExpandedId(null);
       }
     } finally {
       setDeleting(null);
@@ -146,249 +135,221 @@ export default function ProjectActionItemsList({
         body: JSON.stringify({ title: newTitle.trim() }),
       });
       const item = await res.json();
-      const updated = [...items, item];
-      setItems(updated);
+      const next = [...items, item];
+      setItems(next);
       setNewTitle("");
       setAdding(false);
-      onChange?.(updated);
+      onChange?.(next);
+      setExpandedId(item.id);
     } finally {
       setSaving(false);
     }
   }
 
-  function updateSelectedField(patch: Partial<ActionItem>) {
-    if (!selectedItem) return;
-    const merged = { ...selectedItem, ...patch };
-    setSelectedItem(merged);
-    setItems((prev) => {
-      const next = prev.map((i) => (i.id === merged.id ? merged : i));
-      onChange?.(next);
-      return next;
-    });
-    scheduleField(merged.id, patch);
-  }
+  const isOverdue = (item: ActionItem) =>
+    !!item.dueDate && !item.completed && new Date(item.dueDate) < new Date();
 
   const done = items.filter((i) => i.completed).length;
-  const open = items.filter((i) => !i.completed);
-  const completed = items.filter((i) => i.completed);
-  const sorted = [...open, ...completed];
+  const sorted = [...items.filter((i) => !i.completed), ...items.filter((i) => i.completed)];
 
   return (
-    <>
-      <div className="space-y-1">
-        {items.length > 0 && (
-          <div className="mb-2 flex items-center justify-between text-xs text-gray-400">
-            <span>{done}/{items.length} afgerond</span>
-          </div>
-        )}
+    <div className="space-y-0.5">
+      {items.length > 0 && (
+        <p className="mb-2 text-xs text-gray-400">{done}/{items.length} afgerond</p>
+      )}
 
-        {sorted.map((item) => (
-          <div
-            key={item.id}
-            onClick={() => setSelectedItem(item)}
-            className={cn(
-              "group flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-gray-100",
-              item.completed && "opacity-60"
-            )}
-          >
-            <button
-              onClick={(e) => toggleItem(item.id, e)}
-              className="flex-shrink-0 text-gray-400 hover:text-gray-700"
+      {sorted.map((item) => {
+        const expanded = expandedId === item.id;
+        const overdue = isOverdue(item);
+
+        return (
+          <div key={item.id} className={cn(
+            "rounded-xl border transition-all duration-200",
+            expanded
+              ? "border-indigo-200 bg-white shadow-sm"
+              : "border-transparent bg-transparent hover:bg-gray-50"
+          )}>
+            {/* Row */}
+            <div
+              className="flex cursor-pointer items-center gap-2.5 px-3 py-2"
+              onClick={() => setExpandedId(expanded ? null : item.id)}
             >
-              {item.completed
-                ? <CheckSquare className="h-4 w-4 text-green-600" />
-                : <Square className="h-4 w-4" />}
-            </button>
+              <button
+                onClick={(e) => toggleItem(item.id, e)}
+                className="flex-shrink-0 transition-transform active:scale-90"
+              >
+                {item.completed
+                  ? <CheckSquare className="h-4 w-4 text-green-500" />
+                  : <Square className="h-4 w-4 text-gray-300 hover:text-gray-500" />}
+              </button>
 
-            <span className={cn("flex-1 min-w-0 truncate font-medium text-gray-800", item.completed && "line-through text-gray-400")}>
-              {item.title}
-            </span>
+              <span className={cn(
+                "flex-1 min-w-0 truncate text-sm",
+                item.completed ? "line-through text-gray-400" : "font-medium text-gray-800"
+              )}>
+                {item.title}
+              </span>
 
-            <div className="flex flex-shrink-0 items-center gap-2 text-xs text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity sm:opacity-100">
-              {item.assignee && (
-                <span className="hidden items-center gap-1 sm:flex">
-                  <User className="h-3 w-3" />
-                  {item.assignee.split(" ")[0]}
-                </span>
-              )}
-              {item.dueDate && (
-                <span className={cn(
-                  "hidden items-center gap-1 sm:flex",
-                  !item.completed && new Date(item.dueDate) < new Date() && "text-red-500"
-                )}>
-                  <Calendar className="h-3 w-3" />
-                  {new Date(item.dueDate).toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}
-                </span>
-              )}
+              {/* Meta chips */}
+              <div className="flex flex-shrink-0 items-center gap-1.5">
+                {item.assignee && (
+                  <span className="hidden rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600 sm:block">
+                    {item.assignee.split(" ")[0]}
+                  </span>
+                )}
+                {item.dueDate && (
+                  <span className={cn(
+                    "hidden rounded-full px-2 py-0.5 text-[11px] sm:block",
+                    overdue ? "bg-red-100 text-red-600" : "bg-gray-100 text-gray-600"
+                  )}>
+                    {new Date(item.dueDate).toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}
+                  </span>
+                )}
+              </div>
+
+              <ChevronDown className={cn(
+                "h-3.5 w-3.5 flex-shrink-0 text-gray-300 transition-transform duration-200",
+                expanded && "rotate-180 text-indigo-400"
+              )} />
             </div>
 
-            <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-300 group-hover:text-gray-500 transition-colors" />
-          </div>
-        ))}
-
-        {adding ? (
-          <div className="flex items-center gap-2 px-2.5 py-1.5">
-            <Square className="h-4 w-4 flex-shrink-0 text-gray-300" />
-            <Input
-              autoFocus
-              placeholder="Actietitel..."
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              className="h-7 flex-1 text-sm border-0 shadow-none focus-visible:ring-0 px-0 bg-transparent"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") addItem();
-                if (e.key === "Escape") { setNewTitle(""); setAdding(false); }
-              }}
-            />
-            <Button size="sm" onClick={addItem} disabled={!newTitle.trim() || saving} className="h-7 text-xs px-2">
-              {saving ? "..." : "Toevoegen"}
-            </Button>
-            <button onClick={() => { setNewTitle(""); setAdding(false); }} className="text-gray-400 hover:text-gray-600">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => setAdding(true)}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Actie toevoegen
-          </button>
-        )}
-      </div>
-
-      {/* Detail Sheet */}
-      <Sheet open={!!selectedItem} onOpenChange={(open) => { if (!open) setSelectedItem(null); }}>
-        <SheetContent className="w-full sm:max-w-md flex flex-col p-0 gap-0 overflow-hidden">
-          {selectedItem && (
-            <>
-              {/* Coloured header */}
-              <div className={cn(
-                "relative px-6 pt-10 pb-6",
-                selectedItem.completed
-                  ? "bg-gradient-to-br from-green-50 to-emerald-100"
-                  : "bg-gradient-to-br from-indigo-50 to-violet-100"
-              )}>
-                {/* Status pill */}
-                <button
-                  onClick={(e) => toggleItem(selectedItem.id, e)}
-                  className={cn(
-                    "mb-4 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-all",
-                    selectedItem.completed
-                      ? "bg-green-100 text-green-800 hover:bg-green-200"
-                      : "bg-indigo-100 text-indigo-800 hover:bg-indigo-200"
-                  )}
-                >
-                  {selectedItem.completed
-                    ? <><Check className="h-3 w-3" /> Afgerond</>
-                    : <><Square className="h-3 w-3" /> Open</>}
-                </button>
-
-                {/* Title */}
-                <SheetTitle asChild>
+            {/* Expanded detail */}
+            {expanded && (
+              <div className="px-4 pb-4 pt-1">
+                <div className="mb-4 border-t border-gray-100 pt-4">
+                  {/* Editable title */}
                   <textarea
-                    value={selectedItem.title}
-                    onChange={(e) => updateSelectedField({ title: e.target.value })}
+                    value={item.title}
+                    onChange={(e) => updateField(item.id, { title: e.target.value })}
                     rows={2}
-                    className="w-full resize-none bg-transparent text-xl font-bold text-gray-900 leading-snug focus:outline-none placeholder:text-gray-400"
-                    placeholder="Actietitel..."
+                    className="w-full resize-none bg-transparent text-base font-semibold text-gray-900 focus:outline-none leading-snug"
                   />
-                </SheetTitle>
-              </div>
+                </div>
 
-              {/* Body */}
-              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-1">
-
-                {/* Assignee row */}
-                <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-gray-50 transition-colors">
-                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-100">
-                    <User className="h-4 w-4 text-gray-500" />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {/* Assignee */}
+                  <div className="flex items-center gap-2.5 rounded-lg bg-gray-50 px-3 py-2.5">
+                    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-white shadow-sm">
+                      <User className="h-3.5 w-3.5 text-gray-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Actiehouder</p>
+                      <Select
+                        value={item.assignee || "__none__"}
+                        onValueChange={(val) => updateField(item.id, { assignee: val === "__none__" ? null : val })}
+                      >
+                        <SelectTrigger className="mt-0.5 h-auto border-0 bg-transparent p-0 text-sm font-medium text-gray-800 shadow-none focus:ring-0">
+                          <SelectValue placeholder="Niemand" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Niemand</SelectItem>
+                          {participantChoices.map((p) => (
+                            <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Actiehouder</p>
-                    <Select
-                      value={selectedItem.assignee || "__none__"}
-                      onValueChange={(val) => updateSelectedField({ assignee: val === "__none__" ? null : val })}
-                    >
-                      <SelectTrigger className="h-7 border-0 bg-transparent p-0 text-sm font-medium text-gray-800 shadow-none focus:ring-0 hover:text-indigo-700">
-                        <SelectValue placeholder="Niemand toegewezen" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">Niemand toegewezen</SelectItem>
-                        {participantChoices.map((p) => (
-                          <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+
+                  {/* Due date */}
+                  <div className="flex items-center gap-2.5 rounded-lg bg-gray-50 px-3 py-2.5">
+                    <div className={cn(
+                      "flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full shadow-sm",
+                      overdue ? "bg-red-100" : "bg-white"
+                    )}>
+                      <Calendar className={cn("h-3.5 w-3.5", overdue ? "text-red-500" : "text-gray-400")} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Deadline</p>
+                      <Input
+                        type="date"
+                        value={item.dueDate ? item.dueDate.slice(0, 10) : ""}
+                        onChange={(e) => updateField(item.id, { dueDate: e.target.value ? new Date(e.target.value).toISOString() : null })}
+                        className="mt-0.5 h-auto border-0 bg-transparent p-0 text-sm font-medium text-gray-800 shadow-none focus-visible:ring-0 cursor-pointer"
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <div className="mx-3 h-px bg-gray-100" />
-
-                {/* Due date row */}
-                <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-gray-50 transition-colors">
-                  <div className={cn(
-                    "flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full",
-                    selectedItem.dueDate && !selectedItem.completed && new Date(selectedItem.dueDate) < new Date()
-                      ? "bg-red-100"
-                      : "bg-gray-100"
-                  )}>
-                    <Calendar className={cn(
-                      "h-4 w-4",
-                      selectedItem.dueDate && !selectedItem.completed && new Date(selectedItem.dueDate) < new Date()
-                        ? "text-red-500"
-                        : "text-gray-500"
-                    )} />
+                {/* Description */}
+                <div className="mt-3 flex items-start gap-2.5 rounded-lg bg-gray-50 px-3 py-2.5">
+                  <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-white shadow-sm mt-0.5">
+                    <AlignLeft className="h-3.5 w-3.5 text-gray-400" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Deadline</p>
-                    <Input
-                      type="date"
-                      value={selectedItem.dueDate ? selectedItem.dueDate.slice(0, 10) : ""}
-                      onChange={(e) =>
-                        updateSelectedField({ dueDate: e.target.value ? new Date(e.target.value).toISOString() : null })
-                      }
-                      className="h-7 border-0 bg-transparent p-0 text-sm font-medium text-gray-800 shadow-none focus-visible:ring-0 hover:text-indigo-700 cursor-pointer"
-                    />
-                  </div>
-                </div>
-
-                <div className="mx-3 h-px bg-gray-100" />
-
-                {/* Description row */}
-                <div className="flex items-start gap-3 rounded-xl px-3 py-2.5">
-                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-100 mt-0.5">
-                    <AlignLeft className="h-4 w-4 text-gray-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Omschrijving</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Omschrijving</p>
                     <Textarea
                       placeholder="Voeg een omschrijving toe..."
-                      value={selectedItem.description || ""}
-                      onChange={(e) => updateSelectedField({ description: e.target.value || null })}
-                      rows={3}
-                      className="resize-none border-0 bg-transparent p-0 text-sm text-gray-700 shadow-none focus-visible:ring-0 placeholder:text-gray-400"
+                      value={item.description || ""}
+                      onChange={(e) => updateField(item.id, { description: e.target.value || null })}
+                      rows={2}
+                      className="mt-0.5 resize-none border-0 bg-transparent p-0 text-sm text-gray-700 shadow-none focus-visible:ring-0 placeholder:text-gray-400"
                     />
                   </div>
                 </div>
-              </div>
 
-              {/* Footer */}
-              <div className="border-t border-gray-100 px-6 py-4">
-                <button
-                  onClick={() => deleteItem(selectedItem.id)}
-                  disabled={deleting === selectedItem.id}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-40 w-full"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  {deleting === selectedItem.id ? "Verwijderen..." : "Verwijder actie"}
-                </button>
+                {/* Footer actions */}
+                <div className="mt-3 flex items-center justify-between">
+                  <button
+                    onClick={(e) => toggleItem(item.id, e)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
+                      item.completed
+                        ? "bg-green-100 text-green-700 hover:bg-green-200"
+                        : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
+                    )}
+                  >
+                    {item.completed
+                      ? <><Check className="h-3 w-3" />Afgerond</>
+                      : <><Square className="h-3 w-3" />Markeer als afgerond</>}
+                  </button>
+
+                  <button
+                    onClick={() => deleteItem(item.id)}
+                    disabled={deleting === item.id}
+                    className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors disabled:opacity-40"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {deleting === item.id ? "…" : "Verwijderen"}
+                  </button>
+                </div>
               </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
-    </>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Add new */}
+      {adding ? (
+        <div className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-white px-3 py-2 shadow-sm">
+          <Square className="h-4 w-4 flex-shrink-0 text-gray-300" />
+          <Input
+            autoFocus
+            placeholder="Actietitel..."
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            className="h-7 flex-1 border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") addItem();
+              if (e.key === "Escape") { setNewTitle(""); setAdding(false); }
+            }}
+          />
+          <Button size="sm" onClick={addItem} disabled={!newTitle.trim() || saving} className="h-7 px-2 text-xs">
+            {saving ? "…" : "Toevoegen"}
+          </Button>
+          <button onClick={() => { setNewTitle(""); setAdding(false); }} className="text-gray-400 hover:text-gray-600">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Actie toevoegen
+        </button>
+      )}
+    </div>
   );
 }
