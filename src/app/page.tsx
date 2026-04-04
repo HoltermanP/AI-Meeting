@@ -4,9 +4,8 @@ import { prisma } from "@/lib/prisma";
 import MainLayout from "@/components/layout/MainLayout";
 import MeetingCard from "@/components/meeting/MeetingCard";
 import DashboardClient from "./dashboard-client";
-import { formatDuration } from "@/lib/utils";
 import { attachActionItemsToMeetings } from "@/lib/meeting-action-items";
-import { Mic, FileText, CheckSquare, Clock } from "lucide-react";
+import { Mic, FileText, CheckSquare } from "lucide-react";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -46,24 +45,21 @@ export default async function DashboardPage() {
           OR: [{ meeting: { userId } }, { project: { userId } }],
         },
       }),
-      prisma.meeting.aggregate({ where: { userId, duration: { not: null } }, _sum: { duration: true } }),
     ]),
   ]);
 
   const recentMeetings = await attachActionItemsToMeetings(recentMeetingsRaw);
 
-  const [total, completed, pendingActions, durationAgg] = stats;
-  const totalSeconds = durationAgg._sum.duration || 0;
+  const [total, completed, pendingActions] = stats;
 
   return (
     <MainLayout title="Dashboard">
       <div className="mx-auto max-w-6xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6">
         {/* Stats */}
-        <div className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <div className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
           <StatCard icon={<FileText className="h-5 w-5 text-indigo-600" />} label="Totaal meetings" value={total} bg="bg-indigo-50" />
           <StatCard icon={<Mic className="h-5 w-5 text-green-600" />} label="Afgerond" value={completed} bg="bg-green-50" />
           <StatCard icon={<CheckSquare className="h-5 w-5 text-orange-600" />} label="Open acties" value={pendingActions} bg="bg-orange-50" />
-          <StatCard icon={<Clock className="h-5 w-5 text-purple-600" />} label="Totale tijd" value={formatDuration(totalSeconds)} bg="bg-purple-50" />
         </div>
 
         <DashboardClient
