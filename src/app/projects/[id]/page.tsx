@@ -7,7 +7,7 @@ import ProjectActionItemsList from "@/components/meeting/ProjectActionItemsList"
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Briefcase, ArrowLeft, Users, CheckSquare, Plus, Trash2, Loader2, CalendarPlus, Calendar, Play, Check, X
+  Briefcase, ArrowLeft, Users, Plus, Trash2, Loader2, CalendarPlus, Calendar, Play
 } from "lucide-react";
 import Link from "next/link";
 import PlanMeetingDialog from "@/components/project/PlanMeetingDialog";
@@ -250,39 +250,32 @@ export default function ProjectDetailPage() {
           </div>
         ))}
 
-        {/* Stats */}
-        <div className="mb-6 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-lg border border-gray-200 bg-white p-4">
-            <div className="text-xs font-medium text-gray-500">Actiepunten</div>
-            <div className="mt-1 text-2xl font-bold">{actionItems.length}</div>
-            <div className="mt-1 text-xs text-gray-400">
-              {actionItems.filter((i) => i.completed).length} afgerond
-            </div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white p-4">
-            <div className="text-xs font-medium text-gray-500">Teamleden</div>
-            <div className="mt-1 text-2xl font-bold">{participants.length}</div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white p-4">
-            <div className="text-xs font-medium text-gray-500">Meetings</div>
-            <div className="mt-1 text-2xl font-bold">{meetings.length}</div>
-          </div>
-        </div>
-
-        {/* Tabs */}
+        {/* Stats als navigatietegels */}
         <Tabs defaultValue="actions" className="space-y-6" onValueChange={(v) => { if (v === "team") loadEmployees(); }}>
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="actions" className="gap-2">
-              <CheckSquare className="h-4 w-4" />
-              <span className="hidden sm:inline">Acties</span>
+          <TabsList className="mb-0 grid h-auto w-full grid-cols-3 gap-3 bg-transparent p-0">
+            <TabsTrigger
+              value="actions"
+              className="flex h-auto flex-col items-start rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all data-[state=active]:border-indigo-300 data-[state=active]:bg-indigo-50 data-[state=active]:shadow-none"
+            >
+              <span className="text-xs font-medium text-gray-500">Actiepunten</span>
+              <span className="mt-1 text-2xl font-bold text-gray-900">{actionItems.length}</span>
+              <span className="mt-1 text-xs text-gray-400">
+                {actionItems.filter((i) => i.completed).length} afgerond
+              </span>
             </TabsTrigger>
-            <TabsTrigger value="team" className="gap-2">
-              <Users className="h-4 w-4" />
-              <span className="hidden sm:inline">Team</span>
+            <TabsTrigger
+              value="team"
+              className="flex h-auto flex-col items-start rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all data-[state=active]:border-indigo-300 data-[state=active]:bg-indigo-50 data-[state=active]:shadow-none"
+            >
+              <span className="text-xs font-medium text-gray-500">Teamleden</span>
+              <span className="mt-1 text-2xl font-bold text-gray-900">{participants.length}</span>
             </TabsTrigger>
-            <TabsTrigger value="meetings" className="gap-2">
-              <Briefcase className="h-4 w-4" />
-              <span className="hidden sm:inline">Meetings</span>
+            <TabsTrigger
+              value="meetings"
+              className="flex h-auto flex-col items-start rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all data-[state=active]:border-indigo-300 data-[state=active]:bg-indigo-50 data-[state=active]:shadow-none"
+            >
+              <span className="text-xs font-medium text-gray-500">Meetings</span>
+              <span className="mt-1 text-2xl font-bold text-gray-900">{meetings.length}</span>
             </TabsTrigger>
           </TabsList>
 
