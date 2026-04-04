@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import MainLayout from "@/components/layout/MainLayout";
 import AudioRecorder from "@/components/meeting/AudioRecorder";
-import TranscriptView from "@/components/meeting/TranscriptView";
 import NotesEditor from "@/components/meeting/NotesEditor";
 import ActionItemsList from "@/components/meeting/ActionItemsList";
 import ChatPanel from "@/components/meeting/ChatPanel";
@@ -34,7 +33,6 @@ export default function MeetingDetailPage() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [title, setTitle] = useState("");
   const [rawNotes, setRawNotes] = useState("");
-  const [liveTranscript, setLiveTranscript] = useState("");
   const [templates, setTemplates] = useState<
     { id: string; name: string; docxPath?: string | null }[]
   >([]);
@@ -273,8 +271,7 @@ export default function MeetingDetailPage() {
 
   const onTranscribed = useCallback(
     (transcript: string, newTitle: string, meta?: { provisional?: boolean }) => {
-      setLiveTranscript(""); // Clear live transcript when recording stops
-      setMeeting((m: any) => ({
+setMeeting((m: any) => ({
         ...m,
         status: "completed",
         title: newTitle || m.title,
@@ -316,11 +313,7 @@ export default function MeetingDetailPage() {
     );
   }
 
-  const segments = meeting.transcript?.segments
-    ? JSON.parse(meeting.transcript.segments)
-    : [];
-
-  const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).length || 0;
+const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).length || 0;
 
   const notesHtml = meeting?.notes?.content ? notesToHtml(meeting.notes.content) : "";
 
@@ -503,10 +496,9 @@ export default function MeetingDetailPage() {
                 <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                   <Mic className="h-4 w-4" /> Opname
                 </h2>
-                <AudioRecorder 
-                  meetingId={id} 
+                <AudioRecorder
+                  meetingId={id}
                   onTranscribed={onTranscribed}
-                  onLiveTranscript={setLiveTranscript}
                 />
               </div>
             )}
@@ -551,17 +543,6 @@ export default function MeetingDetailPage() {
               </div>
             )}
 
-            {/* Transcript */}
-            {(meeting.transcript || liveTranscript) && (
-              <div>
-                <TranscriptView
-                  content={liveTranscript || meeting.transcript?.content || ""}
-                  segments={meeting.transcript ? segments : []}
-                  isProvisional={Boolean(liveTranscript || meeting.transcript?.isProvisional)}
-                  isLive={Boolean(liveTranscript && meeting.status !== "completed")}
-                />
-              </div>
-            )}
 
             {/* Generated Notes */}
             {meeting.notes && (
