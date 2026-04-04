@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { CheckSquare, Square, Plus, Calendar, User, ChevronRight, X, Trash2 } from "lucide-react";
+import { CheckSquare, Square, Plus, Calendar, User, ChevronRight, X, Trash2, AlignLeft, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
@@ -260,88 +260,126 @@ export default function ProjectActionItemsList({
 
       {/* Detail Sheet */}
       <Sheet open={!!selectedItem} onOpenChange={(open) => { if (!open) setSelectedItem(null); }}>
-        <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+        <SheetContent className="w-full sm:max-w-md flex flex-col p-0 gap-0 overflow-hidden">
           {selectedItem && (
             <>
-              <SheetHeader className="mb-6">
-                <div className="flex items-start gap-3">
-                  <button
-                    onClick={(e) => toggleItem(selectedItem.id, e)}
-                    className="mt-1 flex-shrink-0 text-gray-400 hover:text-gray-700"
-                  >
-                    {selectedItem.completed
-                      ? <CheckSquare className="h-5 w-5 text-green-600" />
-                      : <Square className="h-5 w-5" />}
-                  </button>
-                  <SheetTitle className="text-left leading-snug">
-                    <textarea
-                      value={selectedItem.title}
-                      onChange={(e) => updateSelectedField({ title: e.target.value })}
-                      rows={2}
-                      className="w-full resize-none bg-transparent text-lg font-semibold text-gray-900 focus:outline-none"
+              {/* Coloured header */}
+              <div className={cn(
+                "relative px-6 pt-10 pb-6",
+                selectedItem.completed
+                  ? "bg-gradient-to-br from-green-50 to-emerald-100"
+                  : "bg-gradient-to-br from-indigo-50 to-violet-100"
+              )}>
+                {/* Status pill */}
+                <button
+                  onClick={(e) => toggleItem(selectedItem.id, e)}
+                  className={cn(
+                    "mb-4 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-all",
+                    selectedItem.completed
+                      ? "bg-green-100 text-green-800 hover:bg-green-200"
+                      : "bg-indigo-100 text-indigo-800 hover:bg-indigo-200"
+                  )}
+                >
+                  {selectedItem.completed
+                    ? <><Check className="h-3 w-3" /> Afgerond</>
+                    : <><Square className="h-3 w-3" /> Open</>}
+                </button>
+
+                {/* Title */}
+                <SheetTitle asChild>
+                  <textarea
+                    value={selectedItem.title}
+                    onChange={(e) => updateSelectedField({ title: e.target.value })}
+                    rows={2}
+                    className="w-full resize-none bg-transparent text-xl font-bold text-gray-900 leading-snug focus:outline-none placeholder:text-gray-400"
+                    placeholder="Actietitel..."
+                  />
+                </SheetTitle>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-1">
+
+                {/* Assignee row */}
+                <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-gray-50 transition-colors">
+                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-100">
+                    <User className="h-4 w-4 text-gray-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Actiehouder</p>
+                    <Select
+                      value={selectedItem.assignee || "__none__"}
+                      onValueChange={(val) => updateSelectedField({ assignee: val === "__none__" ? null : val })}
+                    >
+                      <SelectTrigger className="h-7 border-0 bg-transparent p-0 text-sm font-medium text-gray-800 shadow-none focus:ring-0 hover:text-indigo-700">
+                        <SelectValue placeholder="Niemand toegewezen" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Niemand toegewezen</SelectItem>
+                        {participantChoices.map((p) => (
+                          <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="mx-3 h-px bg-gray-100" />
+
+                {/* Due date row */}
+                <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-gray-50 transition-colors">
+                  <div className={cn(
+                    "flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full",
+                    selectedItem.dueDate && !selectedItem.completed && new Date(selectedItem.dueDate) < new Date()
+                      ? "bg-red-100"
+                      : "bg-gray-100"
+                  )}>
+                    <Calendar className={cn(
+                      "h-4 w-4",
+                      selectedItem.dueDate && !selectedItem.completed && new Date(selectedItem.dueDate) < new Date()
+                        ? "text-red-500"
+                        : "text-gray-500"
+                    )} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Deadline</p>
+                    <Input
+                      type="date"
+                      value={selectedItem.dueDate ? selectedItem.dueDate.slice(0, 10) : ""}
+                      onChange={(e) =>
+                        updateSelectedField({ dueDate: e.target.value ? new Date(e.target.value).toISOString() : null })
+                      }
+                      className="h-7 border-0 bg-transparent p-0 text-sm font-medium text-gray-800 shadow-none focus-visible:ring-0 hover:text-indigo-700 cursor-pointer"
                     />
-                  </SheetTitle>
-                </div>
-              </SheetHeader>
-
-              <div className="space-y-5">
-                {/* Assignee */}
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-gray-500">Actiehouder</label>
-                  <Select
-                    value={selectedItem.assignee || "__none__"}
-                    onValueChange={(val) => updateSelectedField({ assignee: val === "__none__" ? null : val })}
-                  >
-                    <SelectTrigger className="h-9 text-sm">
-                      <SelectValue placeholder="Niemand toegewezen" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Niemand toegewezen</SelectItem>
-                      {participantChoices.map((p) => (
-                        <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  </div>
                 </div>
 
-                {/* Due date */}
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-gray-500">Deadline</label>
-                  <Input
-                    type="date"
-                    className="h-9 text-sm"
-                    value={selectedItem.dueDate ? selectedItem.dueDate.slice(0, 10) : ""}
-                    onChange={(e) =>
-                      updateSelectedField({ dueDate: e.target.value ? new Date(e.target.value).toISOString() : null })
-                    }
-                  />
-                </div>
+                <div className="mx-3 h-px bg-gray-100" />
 
-                {/* Description */}
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-gray-500">Omschrijving</label>
-                  <Textarea
-                    placeholder="Voeg een omschrijving toe..."
-                    value={selectedItem.description || ""}
-                    onChange={(e) => updateSelectedField({ description: e.target.value || null })}
-                    rows={4}
-                    className="text-sm resize-none"
-                  />
+                {/* Description row */}
+                <div className="flex items-start gap-3 rounded-xl px-3 py-2.5">
+                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-100 mt-0.5">
+                    <AlignLeft className="h-4 w-4 text-gray-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Omschrijving</p>
+                    <Textarea
+                      placeholder="Voeg een omschrijving toe..."
+                      value={selectedItem.description || ""}
+                      onChange={(e) => updateSelectedField({ description: e.target.value || null })}
+                      rows={3}
+                      className="resize-none border-0 bg-transparent p-0 text-sm text-gray-700 shadow-none focus-visible:ring-0 placeholder:text-gray-400"
+                    />
+                  </div>
                 </div>
+              </div>
 
-                {/* Status badge */}
-                <div className="rounded-lg bg-gray-50 px-3 py-2.5 text-xs text-gray-500">
-                  Status:{" "}
-                  <span className={cn("font-medium", selectedItem.completed ? "text-green-700" : "text-indigo-700")}>
-                    {selectedItem.completed ? "Afgerond" : "Open"}
-                  </span>
-                </div>
-
-                {/* Delete */}
+              {/* Footer */}
+              <div className="border-t border-gray-100 px-6 py-4">
                 <button
                   onClick={() => deleteItem(selectedItem.id)}
                   disabled={deleting === selectedItem.id}
-                  className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-600 transition-colors disabled:opacity-40"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-40 w-full"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   {deleting === selectedItem.id ? "Verwijderen..." : "Verwijder actie"}
