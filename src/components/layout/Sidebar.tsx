@@ -19,6 +19,7 @@ import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import NewProjectDialog from "@/components/project/NewProjectDialog";
 
 type FolderType = {
   id: string;
@@ -48,6 +49,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [foldersExpanded, setFoldersExpanded] = useState(true);
   const [projectsExpanded, setProjectsExpanded] = useState(true);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/folders")
@@ -157,17 +159,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
                   ))}
                   <button
                     type="button"
-                    onClick={async () => {
-                      const name = prompt("Projectnaam:");
-                      if (!name?.trim()) return;
-                      await fetch("/api/projects", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ name: name.trim() }),
-                      });
-                      const updated = await fetch("/api/projects").then((r) => r.json());
-                      setProjects(updated);
-                    }}
+                    onClick={() => setNewProjectOpen(true)}
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-gray-400 hover:bg-gray-100 hover:text-gray-600 md:py-2"
                   >
                     <Plus className="h-4 w-4" />
@@ -239,6 +231,16 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
           </div>
         </ScrollArea>
       </nav>
+
+      {newProjectOpen && (
+        <NewProjectDialog
+          onClose={() => setNewProjectOpen(false)}
+          onCreated={(project) => {
+            setProjects((prev) => [...prev, project].sort((a, b) => a.name.localeCompare(b.name)));
+            setNewProjectOpen(false);
+          }}
+        />
+      )}
 
       {/* Bottom nav */}
       <div className="border-t border-gray-200 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
