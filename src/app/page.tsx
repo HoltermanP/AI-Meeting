@@ -60,7 +60,7 @@ export default async function DashboardPage() {
         <div className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
           <StatCard icon={<FileText className="h-5 w-5 text-indigo-600" />} label="Totaal meetings" value={total} bg="bg-indigo-50" href="/meetings" />
           <StatCard icon={<Mic className="h-5 w-5 text-green-600" />} label="Afgerond" value={completed} bg="bg-green-50" href="/meetings?status=completed" />
-          <StatCard icon={<CheckSquare className="h-5 w-5 text-orange-600" />} label="Open acties" value={pendingActions} bg="bg-orange-50" href="/meetings" />
+          <StatCard icon={<CheckSquare className="h-5 w-5 text-orange-600" />} label="Open acties" value={pendingActions} bg="bg-orange-50" href="/acties" />
         </div>
 
         <DashboardClient

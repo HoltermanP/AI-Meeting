@@ -14,6 +14,7 @@ import {
   Folder,
   Briefcase,
   Users,
+  CheckSquare,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -65,6 +66,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/meetings", label: "Meetings", icon: FileText },
+    { href: "/acties", label: "Acties", icon: CheckSquare },
     { href: "/record", label: "Nieuwe opname", icon: Mic },
     { href: "/medewerkers", label: "Medewerkers", icon: Users },
   ];
