@@ -127,7 +127,7 @@ export default function NewProjectDialog({ onClose, onCreated }: Props) {
                     "h-7 w-7 rounded-full transition-transform",
                     color === c && "ring-2 ring-offset-2 scale-110"
                   )}
-                  style={{ backgroundColor: c, ringColor: c }}
+                  style={{ backgroundColor: c }}
                 />
               ))}
             </div>
