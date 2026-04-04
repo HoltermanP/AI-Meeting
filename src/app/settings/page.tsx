@@ -238,14 +238,14 @@ export default function SettingsPage() {
                 <FileStack className="h-5 w-5 shrink-0 text-indigo-600" />
                 Verslag- en actielijst-templates
               </CardTitle>
-              <CardDescription className="mt-1.5 max-w-2xl space-y-2">
-                <p>
+              <div className="mt-1.5 max-w-2xl space-y-2 text-sm text-muted-foreground">
+                <span className="block">
                   <strong>Word-sjabloon (.docx):</strong> je volledige bestand (logo’s, afbeeldingen, marges,
                   kop/voet, tabellen op de eerste pagina’s) blijft behouden. Het verslag uit de app wordt
                   daar <strong>onder</strong> gezet (nieuwe pagina), met dezelfde Kop1/Kop2-stijlen als in
                   jouw document.
-                </p>
-                <p className="text-xs text-muted-foreground">
+                </span>
+                <span className="block text-xs">
                   <strong>Optioneel — tags in Word:</strong>{" "}
                   <code className="bg-muted px-1 rounded">{"{{meetingTitle}} {{meetingDate}} {{notes}} {{actionItems}}"}</code>{" "}
                   op de plek waar je ze wilt. <code className="bg-muted px-1 rounded">{"{{notes}}"}</code> het
@@ -253,8 +253,8 @@ export default function SettingsPage() {
                   van je notulen als echte Word-koppen in je huisstijl. Andere tags (bv.{" "}
                   <code className="bg-muted px-1 rounded">{"{{samenvatting}}"}</code>) worden na upload
                   herkend; de AI vult ze bij genereren.
-                </p>
-              </CardDescription>
+                </span>
+              </div>
             </div>
             <Button size="sm" className="w-full shrink-0 gap-1 sm:w-auto" onClick={openNew}>
               <Plus className="h-4 w-4" />
