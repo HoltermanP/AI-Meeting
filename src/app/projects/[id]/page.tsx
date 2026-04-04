@@ -7,7 +7,7 @@ import ProjectActionItemsList from "@/components/meeting/ProjectActionItemsList"
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Briefcase, ArrowLeft, Users, Plus, Trash2, Loader2, CalendarPlus, Calendar, Play
+  Briefcase, ArrowLeft, Users, Plus, Trash2, Loader2, CalendarPlus, Calendar, Play, CheckSquare, Mic
 } from "lucide-react";
 import Link from "next/link";
 import PlanMeetingDialog from "@/components/project/PlanMeetingDialog";
@@ -257,9 +257,12 @@ export default function ProjectDetailPage() {
               value="actions"
               className="flex h-auto flex-col items-start rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all data-[state=active]:border-indigo-300 data-[state=active]:bg-indigo-50 data-[state=active]:shadow-none"
             >
-              <span className="text-xs font-medium text-gray-500">Actiepunten</span>
-              <span className="mt-1 text-2xl font-bold text-gray-900">{actionItems.length}</span>
-              <span className="mt-1 text-xs text-gray-400">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100">
+                <CheckSquare className="h-4 w-4 text-orange-600" />
+              </div>
+              <span className="mt-3 text-xs font-medium text-gray-500">Actiepunten</span>
+              <span className="mt-0.5 text-2xl font-bold text-gray-900">{actionItems.length}</span>
+              <span className="mt-0.5 text-xs text-gray-400">
                 {actionItems.filter((i) => i.completed).length} afgerond
               </span>
             </TabsTrigger>
@@ -267,15 +270,21 @@ export default function ProjectDetailPage() {
               value="team"
               className="flex h-auto flex-col items-start rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all data-[state=active]:border-indigo-300 data-[state=active]:bg-indigo-50 data-[state=active]:shadow-none"
             >
-              <span className="text-xs font-medium text-gray-500">Teamleden</span>
-              <span className="mt-1 text-2xl font-bold text-gray-900">{participants.length}</span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-100">
+                <Users className="h-4 w-4 text-indigo-600" />
+              </div>
+              <span className="mt-3 text-xs font-medium text-gray-500">Teamleden</span>
+              <span className="mt-0.5 text-2xl font-bold text-gray-900">{participants.length}</span>
             </TabsTrigger>
             <TabsTrigger
               value="meetings"
               className="flex h-auto flex-col items-start rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all data-[state=active]:border-indigo-300 data-[state=active]:bg-indigo-50 data-[state=active]:shadow-none"
             >
-              <span className="text-xs font-medium text-gray-500">Meetings</span>
-              <span className="mt-1 text-2xl font-bold text-gray-900">{meetings.length}</span>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-100">
+                <Mic className="h-4 w-4 text-green-600" />
+              </div>
+              <span className="mt-3 text-xs font-medium text-gray-500">Meetings</span>
+              <span className="mt-0.5 text-2xl font-bold text-gray-900">{meetings.length}</span>
             </TabsTrigger>
           </TabsList>
 
