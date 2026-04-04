@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Wand2, Trash2, Download, Loader2, Mic, FileText,
-  CheckSquare, MessageSquare, Edit2, Check, X, Briefcase, Calendar, Play, Users
+  CheckSquare, MessageSquare, Edit2, Check, X, Briefcase, Calendar, Users
 } from "lucide-react";
 import AgendaView, { type AgendaItem } from "@/components/meeting/AgendaView";
 import ParticipantsList from "@/components/meeting/ParticipantsList";
@@ -404,23 +404,6 @@ export default function MeetingDetailPage() {
             </div>
 
             <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
-              {meeting.status === "scheduled" && (
-                <Button
-                  onClick={async () => {
-                    await fetch(`/api/meetings/${id}`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ status: "draft" }),
-                    });
-                    setMeeting((m: any) => ({ ...m, status: "draft" }));
-                  }}
-                  className="gap-2 bg-green-600 hover:bg-green-700"
-                  size="sm"
-                >
-                  <Play className="h-4 w-4" />
-                  Start vergadering
-                </Button>
-              )}
               {meeting.transcript && !meeting.notes && (
                 <Button
                   onClick={generateNotes}
