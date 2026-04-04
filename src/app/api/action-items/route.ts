@@ -30,6 +30,27 @@ export async function GET(req: Request) {
   return NextResponse.json(items);
 }
 
+export async function DELETE(req: Request) {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { itemId } = await req.json();
+
+  const item = await prisma.actionItem.findFirst({
+    where: {
+      id: itemId,
+      OR: [
+        { meeting: { userId: session.user.id } },
+        { project: { userId: session.user.id } },
+      ],
+    },
+  });
+  if (!item) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  await prisma.actionItem.delete({ where: { id: itemId } });
+  return NextResponse.json({ ok: true });
+}
+
 export async function PUT(req: Request) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
