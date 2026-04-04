@@ -9,11 +9,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import EmployeeCheckboxList from "@/components/meeting/EmployeeCheckboxList";
+
+type Employee = { id: string; firstName: string; lastName: string; email: string };
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** Bijv. vanuit /meetings?projectId=… — vooraf geselecteerd project */
   defaultProjectId?: string | null;
 };
 
@@ -32,15 +34,16 @@ export default function NewMeetingDialog({ open, onClose, defaultProjectId }: Pr
   const [platform, setPlatform] = useState("other");
   const [templateId, setTemplateId] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
-  const [templates, setTemplates] = useState<
-    { id: string; name: string; userId: string }[]
-  >([]);
+  const [templates, setTemplates] = useState<{ id: string; name: string; userId: string }[]>([]);
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
-  const [projectActions, setProjectActions] = useState<
-    { id: string; title: string; completed: boolean }[]
-  >([]);
+  const [projectActions, setProjectActions] = useState<{ id: string; title: string; completed: boolean }[]>([]);
   const [loadingProjectActions, setLoadingProjectActions] = useState(false);
+
+  // Participants
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [loadingParticipants, setLoadingParticipants] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -52,6 +55,10 @@ export default function NewMeetingDialog({ open, onClose, defaultProjectId }: Pr
       .then((r) => r.json())
       .then((list) => setProjects(Array.isArray(list) ? list : []))
       .catch(() => setProjects([]));
+    fetch("/api/employees")
+      .then((r) => r.json())
+      .then((list) => setEmployees(Array.isArray(list) ? list : []))
+      .catch(() => setEmployees([]));
   }, [open]);
 
   useEffect(() => {
@@ -59,6 +66,27 @@ export default function NewMeetingDialog({ open, onClose, defaultProjectId }: Pr
     setProjectId(defaultProjectId || "");
   }, [open, defaultProjectId]);
 
+  // Auto-select project participants when project + employees are known
+  useEffect(() => {
+    if (!open || !projectId || employees.length === 0) {
+      if (!projectId) setSelectedIds(new Set());
+      return;
+    }
+    setLoadingParticipants(true);
+    fetch(`/api/projects/${projectId}/participants`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((pp: { name: string; email: string | null }[]) => {
+        const emails = new Set(pp.map((p) => p.email?.toLowerCase()).filter(Boolean) as string[]);
+        const ids = employees
+          .filter((e) => emails.has(e.email.toLowerCase()))
+          .map((e) => e.id);
+        setSelectedIds(new Set(ids));
+      })
+      .catch(() => {})
+      .finally(() => setLoadingParticipants(false));
+  }, [open, projectId, employees]);
+
+  // Project actions preview
   useEffect(() => {
     if (!open || !projectId) {
       setProjectActions([]);
@@ -75,6 +103,9 @@ export default function NewMeetingDialog({ open, onClose, defaultProjectId }: Pr
   async function handleCreate() {
     setLoading(true);
     try {
+      const participants = employees
+        .filter((e) => selectedIds.has(e.id))
+        .map((e) => ({ name: `${e.firstName} ${e.lastName}`, email: e.email }));
       const res = await fetch("/api/meetings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -83,6 +114,7 @@ export default function NewMeetingDialog({ open, onClose, defaultProjectId }: Pr
           platform,
           ...(templateId ? { templateId } : {}),
           ...(projectId ? { projectId } : {}),
+          ...(participants.length > 0 ? { participants } : {}),
         }),
       });
       const meeting = await res.json();
@@ -139,8 +171,7 @@ export default function NewMeetingDialog({ open, onClose, defaultProjectId }: Pr
                   </div>
                 ) : projectActions.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
-                    Nog geen actiepunten. Na aanmaken zie je hier dezelfde lijst als in andere meetings van dit
-                    project.
+                    Nog geen actiepunten. Na aanmaken zie je hier dezelfde lijst als in andere meetings van dit project.
                   </p>
                 ) : (
                   <ul className="max-h-36 space-y-1 overflow-y-auto text-sm text-foreground">
@@ -160,6 +191,23 @@ export default function NewMeetingDialog({ open, onClose, defaultProjectId }: Pr
               </div>
             ) : null}
           </div>
+
+          {/* Participants */}
+          <div className="space-y-1.5">
+            <Label>
+              Deelnemers
+              {selectedIds.size > 0 && (
+                <span className="ml-2 text-xs font-normal text-indigo-600">{selectedIds.size} geselecteerd</span>
+              )}
+            </Label>
+            <EmployeeCheckboxList
+              employees={employees}
+              selected={selectedIds}
+              onChange={setSelectedIds}
+              loading={loadingParticipants}
+            />
+          </div>
+
           <div className="space-y-1.5">
             <Label>Platform</Label>
             <Select value={platform} onValueChange={setPlatform}>

@@ -1,13 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Loader2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import AgendaEditor from "@/components/meeting/AgendaEditor";
+import EmployeeCheckboxList from "@/components/meeting/EmployeeCheckboxList";
 import type { AgendaItem } from "@/components/meeting/AgendaView";
 
 export type { AgendaItem };
+
+type Employee = { id: string; firstName: string; lastName: string; email: string };
 
 type Props = {
   projectId: string;
@@ -31,6 +35,37 @@ export default function PlanMeetingDialog({ projectId, projectName, onClose, onC
   const [lastMeetingTitle, setLastMeetingTitle] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Participants
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [loadingParticipants, setLoadingParticipants] = useState(true);
+
+  // Load employees + pre-select project participants
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [empRes, ppRes] = await Promise.all([
+          fetch("/api/employees"),
+          fetch(`/api/projects/${projectId}/participants`),
+        ]);
+        const emps: Employee[] = empRes.ok ? await empRes.json() : [];
+        const pp: { name: string; email: string | null }[] = ppRes.ok ? await ppRes.json() : [];
+        if (cancelled) return;
+        setEmployees(Array.isArray(emps) ? emps : []);
+        const emails = new Set(pp.map((p) => p.email?.toLowerCase()).filter(Boolean) as string[]);
+        const ids = emps.filter((e) => emails.has(e.email.toLowerCase())).map((e) => e.id);
+        setSelectedIds(new Set(ids));
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setLoadingParticipants(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [projectId]);
+
   async function generateAgenda() {
     setGenerating(true);
     setError(null);
@@ -52,10 +87,19 @@ export default function PlanMeetingDialog({ projectId, projectName, onClose, onC
     if (!title.trim() || agendaItems.length === 0) return;
     setSaving(true);
     try {
+      const participants = employees
+        .filter((e) => selectedIds.has(e.id))
+        .map((e) => ({ name: `${e.firstName} ${e.lastName}`, email: e.email }));
+
       const res = await fetch("/api/meetings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), projectId, status: "scheduled" }),
+        body: JSON.stringify({
+          title: title.trim(),
+          projectId,
+          status: "scheduled",
+          ...(participants.length > 0 ? { participants } : {}),
+        }),
       });
       if (!res.ok) throw new Error("Vergadering aanmaken mislukt");
       const meeting = await res.json();
@@ -116,6 +160,22 @@ export default function PlanMeetingDialog({ projectId, projectName, onClose, onC
                 className="text-sm"
               />
             </div>
+          </div>
+
+          {/* Participants */}
+          <div>
+            <Label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-400">
+              Deelnemers
+              {selectedIds.size > 0 && (
+                <span className="ml-2 normal-case font-normal text-indigo-600">{selectedIds.size} geselecteerd</span>
+              )}
+            </Label>
+            <EmployeeCheckboxList
+              employees={employees}
+              selected={selectedIds}
+              onChange={setSelectedIds}
+              loading={loadingParticipants}
+            />
           </div>
 
           {error && (

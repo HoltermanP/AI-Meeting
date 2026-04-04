@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Briefcase, CalendarDays, Loader2, Wand2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import AgendaEditor from "@/components/meeting/AgendaEditor";
+import EmployeeCheckboxList from "@/components/meeting/EmployeeCheckboxList";
 import type { AgendaItem } from "@/components/meeting/AgendaView";
 
 type Project = { id: string; name: string; color: string };
+type Employee = { id: string; firstName: string; lastName: string; email: string };
 
 type Props = {
   projects: Project[];
@@ -23,7 +26,6 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
   const [mode, setMode] = useState<Mode>("pick");
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
 
-  // Shared fields
   const [title, setTitle] = useState("");
   const [scheduledAt, setScheduledAt] = useState(() => {
     const d = new Date();
@@ -32,7 +34,6 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
     return d.toISOString().slice(0, 16);
   });
 
-  // Agenda (project flow)
   const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
   const [generating, setGenerating] = useState(false);
   const [lastMeetingTitle, setLastMeetingTitle] = useState<string | null>(null);
@@ -41,6 +42,37 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Participants
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [loadingParticipants, setLoadingParticipants] = useState(false);
+
+  // Load employees once
+  useEffect(() => {
+    fetch("/api/employees")
+      .then((r) => r.json())
+      .then((list) => setEmployees(Array.isArray(list) ? list : []))
+      .catch(() => {});
+  }, []);
+
+  // When project is selected, auto-select its participants
+  useEffect(() => {
+    if (!selectedProject || employees.length === 0) {
+      setSelectedIds(new Set());
+      return;
+    }
+    setLoadingParticipants(true);
+    fetch(`/api/projects/${selectedProject.id}/participants`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((pp: { name: string; email: string | null }[]) => {
+        const emails = new Set(pp.map((p) => p.email?.toLowerCase()).filter(Boolean) as string[]);
+        const ids = employees.filter((e) => emails.has(e.email.toLowerCase())).map((e) => e.id);
+        setSelectedIds(new Set(ids));
+      })
+      .catch(() => {})
+      .finally(() => setLoadingParticipants(false));
+  }, [selectedProject, employees]);
+
   function selectProject(p: Project) {
     setSelectedProject(p);
     setTitle(`Vergadering – ${p.name}`);
@@ -48,6 +80,8 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
   }
 
   function selectStandalone() {
+    setSelectedProject(null);
+    setSelectedIds(new Set());
     setTitle("");
     setMode("standalone");
   }
@@ -75,6 +109,10 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
     setSaving(true);
     setError(null);
     try {
+      const participants = employees
+        .filter((e) => selectedIds.has(e.id))
+        .map((e) => ({ name: `${e.firstName} ${e.lastName}`, email: e.email }));
+
       const res = await fetch("/api/meetings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -82,6 +120,7 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
           title: title.trim(),
           status: "scheduled",
           ...(selectedProject ? { projectId: selectedProject.id } : {}),
+          ...(participants.length > 0 ? { participants } : {}),
         }),
       });
       if (!res.ok) throw new Error("Aanmaken mislukt");
@@ -116,7 +155,10 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
         <div className="px-6 pt-6 pb-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
             {mode !== "pick" && (
-              <button onClick={() => { setMode("pick"); setSelectedProject(null); setAgendaItems([]); setAgendaStep("generate"); }} className="text-gray-400 hover:text-gray-600">
+              <button
+                onClick={() => { setMode("pick"); setSelectedProject(null); setSelectedIds(new Set()); setAgendaItems([]); setAgendaStep("generate"); }}
+                className="text-gray-400 hover:text-gray-600"
+              >
                 <ArrowLeft className="h-4 w-4" />
               </button>
             )}
@@ -176,7 +218,7 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
             </div>
           )}
 
-          {/* Shared title + date (modes 2 & 3) */}
+          {/* Shared title + date + participants (modes 2 & 3) */}
           {mode !== "pick" && (
             <div className="space-y-3">
               <div>
@@ -186,6 +228,20 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
               <div>
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-400">Datum & tijd</label>
                 <Input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className="text-sm" />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  Deelnemers
+                  {selectedIds.size > 0 && (
+                    <span className="ml-2 normal-case font-normal text-indigo-600">{selectedIds.size} geselecteerd</span>
+                  )}
+                </label>
+                <EmployeeCheckboxList
+                  employees={employees}
+                  selected={selectedIds}
+                  onChange={setSelectedIds}
+                  loading={loadingParticipants}
+                />
               </div>
             </div>
           )}
@@ -209,7 +265,6 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
             </div>
           )}
 
-          {/* Agenda editor (project + standalone) */}
           {((mode === "project-agenda" && agendaStep === "edit") || mode === "standalone") && (
             <AgendaEditor
               items={agendaItems}
