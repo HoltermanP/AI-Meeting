@@ -14,9 +14,10 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Wand2, Trash2, Download, Loader2, Mic, FileText,
-  CheckSquare, MessageSquare, Edit2, Check, X, Briefcase, Calendar, Play
+  CheckSquare, MessageSquare, Edit2, Check, X, Briefcase, Calendar, Play, Users
 } from "lucide-react";
 import AgendaView, { type AgendaItem } from "@/components/meeting/AgendaView";
+import ParticipantsList from "@/components/meeting/ParticipantsList";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { formatDateTime, formatDuration, platformIcon } from "@/lib/utils";
@@ -500,6 +501,18 @@ export default function MeetingDetailPage() {
                 </div>
               </div>
             )}
+
+            {/* Participants */}
+            <div>
+              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <Users className="h-4 w-4" /> Deelnemers
+              </h2>
+              <ParticipantsList
+                meetingId={id}
+                participants={meeting.participants || []}
+                onChange={(participants) => setMeeting((m: any) => ({ ...m, participants }))}
+              />
+            </div>
 
             {/* Recording */}
             {meeting.status !== "completed" && (
