@@ -14,8 +14,9 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Wand2, Trash2, Download, Loader2, Mic, FileText,
-  CheckSquare, MessageSquare, Edit2, Check, X, Briefcase
+  CheckSquare, MessageSquare, Edit2, Check, X, Briefcase, Calendar, Play
 } from "lucide-react";
+import AgendaView, { type AgendaItem } from "@/components/meeting/AgendaView";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { formatDateTime, formatDuration, platformIcon } from "@/lib/utils";
@@ -43,6 +44,7 @@ export default function MeetingDetailPage() {
   const [exportFormat, setExportFormat] = useState<"word" | "pdf">("word");
   const pdfSourceRef = useRef<HTMLDivElement>(null);
   const emptyActionItems = useMemo(() => [], []);
+  const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
 
   useEffect(() => {
     loadMeeting();
@@ -61,6 +63,9 @@ export default function MeetingDetailPage() {
     setTitle(data.title || "");
     setRawNotes(data.notes?.rawNotes || "");
     setTemplateId(data.templateId || "");
+    if (data.agenda) {
+      try { setAgendaItems(JSON.parse(data.agenda)); } catch { /* skip */ }
+    }
     setLoading(false);
   }
 
@@ -377,10 +382,18 @@ export default function MeetingDetailPage() {
                   <Badge variant="warning">{pendingActions} open taken</Badge>
                 )}
               </div>
+              {meeting.scheduledAt && meeting.status === "scheduled" && (
+                <div className="mt-2 flex items-center gap-2 text-sm text-indigo-700">
+                  <Calendar className="h-3.5 w-3.5" />
+                  {new Date(meeting.scheduledAt).toLocaleString("nl-NL", {
+                    weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit"
+                  })}
+                </div>
+              )}
               {meeting.project && (
                 <Link
-                  href={`/meetings?projectId=${meeting.project.id}`}
-                  className="mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-gray-100"
+                  href={`/projects/${meeting.project.id}`}
+                  className="mt-1 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-gray-100"
                   style={{ color: meeting.project.color }}
                 >
                   <Briefcase className="h-3.5 w-3.5" />
@@ -390,6 +403,23 @@ export default function MeetingDetailPage() {
             </div>
 
             <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+              {meeting.status === "scheduled" && (
+                <Button
+                  onClick={async () => {
+                    await fetch(`/api/meetings/${id}`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ status: "draft" }),
+                    });
+                    setMeeting((m: any) => ({ ...m, status: "draft" }));
+                  }}
+                  className="gap-2 bg-green-600 hover:bg-green-700"
+                  size="sm"
+                >
+                  <Play className="h-4 w-4" />
+                  Start vergadering
+                </Button>
+              )}
               {meeting.transcript && !meeting.notes && (
                 <Button
                   onClick={generateNotes}
@@ -455,6 +485,22 @@ export default function MeetingDetailPage() {
         <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden lg:flex-row">
           {/* Main content */}
           <div className="min-w-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
+            {/* Agenda */}
+            {agendaItems.length > 0 && meeting.status !== "completed" && (
+              <div>
+                <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700">
+                  <Calendar className="h-4 w-4" /> Agenda
+                </h2>
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <AgendaView
+                    meetingId={id}
+                    items={agendaItems}
+                    onChange={setAgendaItems}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Recording */}
             {meeting.status !== "completed" && (
               <div>

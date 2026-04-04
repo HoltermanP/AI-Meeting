@@ -47,6 +47,9 @@ model Meeting {
   endedAt     DateTime?
   duration    Int?
   audioPath   String?
+  scheduledAt DateTime?
+  /// JSON: AgendaItem[] – agenda voor geplande vergaderingen
+  agenda      String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 

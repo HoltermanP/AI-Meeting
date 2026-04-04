@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Briefcase, ArrowLeft, Users, CheckSquare, Plus, Trash2, Loader2
+  Briefcase, ArrowLeft, Users, CheckSquare, Plus, Trash2, Loader2, CalendarPlus, Calendar, Play
 } from "lucide-react";
 import Link from "next/link";
+import PlanMeetingDialog from "@/components/project/PlanMeetingDialog";
 
 type Project = {
   id: string;
@@ -39,6 +40,7 @@ type Meeting = {
   title: string;
   createdAt: string;
   status: string;
+  scheduledAt?: string | null;
 };
 
 export default function ProjectDetailPage() {
@@ -55,6 +57,7 @@ export default function ProjectDetailPage() {
   const [deletingParticipant, setDeletingParticipant] = useState<string | null>(null);
   const [deletingProject, setDeletingProject] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showPlanDialog, setShowPlanDialog] = useState(false);
 
   useEffect(() => {
     loadProject();
@@ -316,13 +319,51 @@ export default function ProjectDetailPage() {
 
           {/* Meetings Tab */}
           <TabsContent value="meetings" className="space-y-4">
+            {/* Planned meetings */}
+            {meetings.filter((m) => m.status === "scheduled").map((m) => (
+              <div key={m.id} className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <Calendar className="h-4 w-4 text-indigo-500" />
+                      <span className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Gepland</span>
+                    </div>
+                    <p className="font-semibold text-gray-900">{m.title}</p>
+                    {m.scheduledAt && (
+                      <p className="mt-1 text-sm text-indigo-700">
+                        {new Date(m.scheduledAt).toLocaleString("nl-NL", {
+                          weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit"
+                        })}
+                      </p>
+                    )}
+                  </div>
+                  <Link href={`/meetings/${m.id}`}>
+                    <Button size="sm" className="gap-2 shrink-0">
+                      <Play className="h-3.5 w-3.5" />
+                      Openen
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            ))}
+
+            {/* Plan button */}
+            <button
+              onClick={() => setShowPlanDialog(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white py-4 text-sm text-gray-500 hover:border-indigo-300 hover:text-indigo-600 transition-colors"
+            >
+              <CalendarPlus className="h-4 w-4" />
+              Vergadering plannen
+            </button>
+
+            {/* Past meetings */}
             <div className="rounded-lg border border-gray-200 bg-white p-6">
-              <h2 className="mb-4 text-lg font-semibold">Meetings</h2>
-              {meetings.length === 0 ? (
-                <p className="text-sm text-gray-500">Geen meetings in dit project</p>
+              <h2 className="mb-4 text-lg font-semibold">Eerdere meetings</h2>
+              {meetings.filter((m) => m.status !== "scheduled").length === 0 ? (
+                <p className="text-sm text-gray-500">Nog geen meetings in dit project</p>
               ) : (
                 <div className="space-y-2">
-                  {meetings.map((m) => (
+                  {meetings.filter((m) => m.status !== "scheduled").map((m) => (
                     <Link
                       key={m.id}
                       href={`/meetings/${m.id}`}
@@ -330,7 +371,7 @@ export default function ProjectDetailPage() {
                     >
                       <p className="font-medium text-gray-900">{m.title}</p>
                       <p className="text-xs text-gray-500">
-                        {new Date(m.createdAt).toLocaleDateString()}
+                        {new Date(m.createdAt).toLocaleDateString("nl-NL")}
                       </p>
                     </Link>
                   ))}
@@ -340,6 +381,18 @@ export default function ProjectDetailPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {showPlanDialog && project && (
+        <PlanMeetingDialog
+          projectId={id}
+          projectName={project.name}
+          onClose={() => setShowPlanDialog(false)}
+          onCreated={(meeting) => {
+            setMeetings((prev) => [{ id: meeting.id, title: meeting.title, createdAt: new Date().toISOString(), status: "scheduled", scheduledAt: meeting.scheduledAt }, ...prev]);
+            setShowPlanDialog(false);
+          }}
+        />
+      )}
     </MainLayout>
   );
 }

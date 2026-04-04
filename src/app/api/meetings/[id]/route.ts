@@ -76,6 +76,8 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       ...(body.endedAt !== undefined && { endedAt: body.endedAt }),
       ...(body.duration !== undefined && { duration: body.duration }),
       ...(templateId !== undefined && { templateId }),
+      ...(body.scheduledAt !== undefined && { scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : null }),
+      ...(body.agenda !== undefined && { agenda: body.agenda }),
     },
   });
 
