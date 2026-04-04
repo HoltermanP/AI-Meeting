@@ -61,29 +61,26 @@ export default function ProjectDetailPage() {
 
   async function loadProject() {
     try {
-      const projectRes = await fetch(`/api/projects`);
+      const [projectRes, itemsRes, participantsRes, meetingsRes] = await Promise.all([
+        fetch(`/api/projects/${id}`),
+        fetch(`/api/projects/${id}/action-items`),
+        fetch(`/api/projects/${id}/participants`),
+        fetch(`/api/meetings?projectId=${id}&minimal=true`),
+      ]);
+
       if (!projectRes.ok) {
         router.push("/");
         return;
       }
-      const projects = await projectRes.json();
-      const proj = projects.find((p: Project) => p.id === id);
-      if (!proj) {
-        router.push("/");
-        return;
-      }
-      setProject(proj);
 
-      const [itemsRes, participantsRes, meetingsRes] = await Promise.all([
-        fetch(`/api/projects/${id}/action-items`),
-        fetch(`/api/projects/${id}/participants`),
-        fetch(`/api/meetings?projectId=${id}`),
+      const [proj, items, parts, mtgs] = await Promise.all([
+        projectRes.json(),
+        itemsRes.json(),
+        participantsRes.json(),
+        meetingsRes.json(),
       ]);
 
-      const items = await itemsRes.json();
-      const parts = await participantsRes.json();
-      const mtgs = await meetingsRes.json();
-
+      setProject(proj);
       setActionItems(items);
       setParticipants(parts);
       setMeetings(mtgs);

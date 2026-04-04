@@ -26,21 +26,33 @@ export async function GET(req: Request) {
   const folderId = searchParams.get("folderId");
   const projectId = searchParams.get("projectId");
   const status = searchParams.get("status");
+  const minimal = searchParams.get("minimal") === "true";
+
+  const where = {
+    userId: session.user.id,
+    ...(folderId ? { folderId } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(status ? { status } : {}),
+    ...(search ? {
+      OR: [
+        { title: { contains: search } },
+        { notes: { content: { contains: search } } },
+        { transcript: { content: { contains: search } } },
+      ]
+    } : {}),
+  };
+
+  if (minimal) {
+    const meetings = await prisma.meeting.findMany({
+      where,
+      select: { id: true, title: true, createdAt: true, status: true },
+      orderBy: { createdAt: "desc" },
+    });
+    return NextResponse.json(meetings);
+  }
 
   const meetings = await prisma.meeting.findMany({
-    where: {
-      userId: session.user.id,
-      ...(folderId ? { folderId } : {}),
-      ...(projectId ? { projectId } : {}),
-      ...(status ? { status } : {}),
-      ...(search ? {
-        OR: [
-          { title: { contains: search } },
-          { notes: { content: { contains: search } } },
-          { transcript: { content: { contains: search } } },
-        ]
-      } : {}),
-    },
+    where,
     include: {
       notes: { select: { summary: true } },
       participants: true,
