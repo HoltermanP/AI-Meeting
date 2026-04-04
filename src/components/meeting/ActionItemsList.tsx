@@ -1,9 +1,12 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { CheckSquare, Square, Plus, User, Calendar } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import {
+  CheckSquare, Square, Plus, Calendar, User, X, Trash2, AlignLeft, Check, ChevronDown,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 type ActionItem = {
@@ -20,98 +23,104 @@ type Participant = { id: string; name: string; email?: string | null };
 type Props = {
   meetingId: string;
   items: ActionItem[];
-  /** Ingeschreven deelnemers — snelkeuze + suggesties bij typen (datalist). */
   participants?: Participant[];
   onChange?: (items: ActionItem[]) => void;
 };
 
-export default function ActionItemsList({
-  meetingId,
-  items: initialItems,
-  participants = [],
-  onChange,
-}: Props) {
+export default function ActionItemsList({ meetingId, items: initialItems, participants = [], onChange }: Props) {
   const [items, setItems] = useState(initialItems);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
-  const [newAssignee, setNewAssignee] = useState("");
   const [adding, setAdding] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const debounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const datalistId = `action-assignees-${meetingId}`;
   const participantChoices = useMemo(() => {
     const seen = new Set<string>();
     const list: { id: string; name: string }[] = [];
     for (const p of participants) {
       const n = p.name?.trim();
       if (!n) continue;
-      const key = n.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seen.has(n.toLowerCase())) continue;
+      seen.add(n.toLowerCase());
       list.push({ id: p.id, name: n });
     }
     return list;
   }, [participants]);
 
+  useEffect(() => { setItems(initialItems); }, [initialItems]);
   useEffect(() => {
-    setItems(initialItems);
-  }, [initialItems]);
+    const map = debounceRef.current;
+    return () => { map.forEach((t) => clearTimeout(t)); };
+  }, []);
 
-  const flushAssignee = useCallback(
-    async (itemId: string, assignee: string | null) => {
-      const res = await fetch(`/api/meetings/${meetingId}/action-items`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          itemId,
-          assignee: assignee?.trim() ? assignee.trim() : null,
-        }),
-      });
-      if (!res.ok) return;
-      const updatedRow = await res.json();
-      setItems((prev) => {
-        const next = prev.map((i) => (i.id === itemId ? { ...i, assignee: updatedRow.assignee } : i));
-        onChange?.(next);
-        return next;
-      });
-    },
-    [meetingId, onChange]
-  );
+  async function saveField(itemId: string, patch: Partial<ActionItem>) {
+    const res = await fetch(`/api/meetings/${meetingId}/action-items`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId, ...patch }),
+    });
+    if (!res.ok) return;
+    const row = await res.json();
+    setItems((prev) => {
+      const next = prev.map((i) => (i.id === itemId ? { ...i, ...row } : i));
+      onChange?.(next);
+      return next;
+    });
+  }
 
-  const scheduleAssigneeSave = useCallback(
-    (itemId: string, value: string) => {
+  const scheduleField = useCallback(
+    (itemId: string, patch: Partial<ActionItem>) => {
       const map = debounceRef.current;
       const prev = map.get(itemId);
       if (prev) clearTimeout(prev);
-      const t = setTimeout(() => {
-        map.delete(itemId);
-        void flushAssignee(itemId, value || null);
-      }, 450);
+      const t = setTimeout(() => { map.delete(itemId); void saveField(itemId, patch); }, 500);
       map.set(itemId, t);
     },
-    [flushAssignee]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [meetingId, onChange]
   );
 
-  useEffect(() => {
-    return () => {
-      debounceRef.current.forEach((t) => clearTimeout(t));
-    };
-  }, []);
+  function updateField(itemId: string, patch: Partial<ActionItem>) {
+    setItems((prev) => {
+      const next = prev.map((i) => (i.id === itemId ? { ...i, ...patch } : i));
+      onChange?.(next);
+      return next;
+    });
+    scheduleField(itemId, patch);
+  }
 
-  async function toggleItem(id: string) {
+  async function toggleItem(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
     const item = items.find((i) => i.id === id);
     if (!item) return;
-
-    const updated = items.map((i) =>
-      i.id === id ? { ...i, completed: !i.completed } : i
-    );
-    setItems(updated);
-
+    const next = items.map((i) => (i.id === id ? { ...i, completed: !i.completed } : i));
+    setItems(next);
+    onChange?.(next);
     await fetch(`/api/meetings/${meetingId}/action-items`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ itemId: id, completed: !item.completed }),
     });
-    onChange?.(updated);
+  }
+
+  async function deleteItem(id: string) {
+    setDeleting(id);
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/action-items`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId: id }),
+      });
+      if (res.ok) {
+        const next = items.filter((i) => i.id !== id);
+        setItems(next);
+        onChange?.(next);
+        if (expandedId === id) setExpandedId(null);
+      }
+    } finally {
+      setDeleting(null);
+    }
   }
 
   async function addItem() {
@@ -119,36 +128,29 @@ export default function ActionItemsList({
     const res = await fetch(`/api/meetings/${meetingId}/action-items`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: newTitle.trim(),
-        assignee: newAssignee.trim() || undefined,
-      }),
+      body: JSON.stringify({ title: newTitle.trim() }),
     });
     const item = await res.json();
-    const updated = [...items, item];
-    setItems(updated);
+    const next = [...items, item];
+    setItems(next);
     setNewTitle("");
-    setNewAssignee("");
     setAdding(false);
-    onChange?.(updated);
+    onChange?.(next);
+    setExpandedId(item.id);
   }
 
+  const isOverdue = (item: ActionItem) =>
+    !!item.dueDate && !item.completed && new Date(item.dueDate) < new Date();
+
   const done = items.filter((i) => i.completed).length;
+  const sorted = [...items.filter((i) => !i.completed), ...items.filter((i) => i.completed)];
 
   return (
-    <div className="space-y-3">
-      <datalist id={datalistId}>
-        {participantChoices.map((p) => (
-          <option key={p.id} value={p.name} />
-        ))}
-      </datalist>
-
+    <div className="space-y-0.5">
       {items.length > 0 && (
-        <div className="flex items-center justify-between text-xs text-gray-400">
-          <span>
-            {done}/{items.length} afgerond
-          </span>
-          <div className="flex-1 mx-3 h-1.5 rounded-full bg-gray-100">
+        <div className="mb-2 flex items-center gap-3 text-xs text-gray-400">
+          <span>{done}/{items.length} afgerond</span>
+          <div className="flex-1 h-1.5 rounded-full bg-gray-100">
             <div
               className="h-full rounded-full bg-indigo-500 transition-all"
               style={{ width: `${items.length ? (done / items.length) * 100 : 0}%` }}
@@ -157,145 +159,185 @@ export default function ActionItemsList({
         </div>
       )}
 
-      <div className="space-y-2.5">
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className="rounded-lg border border-transparent p-2 hover:border-gray-100 hover:bg-gray-50/80 group"
-          >
-            <div className="flex items-start gap-2">
-              <button
-                type="button"
-                onClick={() => toggleItem(item.id)}
-                className="mt-0.5 flex-shrink-0"
-              >
-                {item.completed ? (
-                  <CheckSquare className="h-4 w-4 text-indigo-500" />
-                ) : (
-                  <Square className="h-4 w-4 text-gray-300 group-hover:text-gray-400" />
-                )}
+      {sorted.map((item) => {
+        const expanded = expandedId === item.id;
+        const overdue = isOverdue(item);
+
+        return (
+          <div key={item.id} className={cn(
+            "rounded-xl border transition-all duration-200",
+            expanded ? "border-indigo-200 bg-white shadow-sm" : "border-transparent bg-transparent hover:bg-gray-50"
+          )}>
+            {/* Row */}
+            <div
+              className="flex cursor-pointer items-center gap-2.5 px-3 py-2"
+              onClick={() => setExpandedId(expanded ? null : item.id)}
+            >
+              <button onClick={(e) => toggleItem(item.id, e)} className="flex-shrink-0 transition-transform active:scale-90">
+                {item.completed
+                  ? <CheckSquare className="h-4 w-4 text-green-500" />
+                  : <Square className="h-4 w-4 text-gray-300 hover:text-gray-500" />}
               </button>
-              <div className="flex-1 min-w-0 space-y-1.5">
-                <p
-                  className={cn(
-                    "text-sm",
-                    item.completed ? "line-through text-gray-400" : "text-gray-700"
-                  )}
-                >
-                  {item.title}
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                    <User className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
-                    <Input
-                      value={item.assignee ?? ""}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setItems((prev) =>
-                          prev.map((i) => (i.id === item.id ? { ...i, assignee: v || null } : i))
-                        );
-                        scheduleAssigneeSave(item.id, v);
-                      }}
-                      onBlur={(e) => {
-                        const map = debounceRef.current;
-                        const t = map.get(item.id);
-                        if (t) {
-                          clearTimeout(t);
-                          map.delete(item.id);
-                        }
-                        void flushAssignee(item.id, e.target.value);
-                      }}
-                      list={participantChoices.length ? datalistId : undefined}
-                      placeholder="Toegewezen aan…"
-                      className="h-8 max-w-[16rem] text-xs"
-                      aria-label="Toegewezen aan"
-                    />
-                  </div>
-                  {item.dueDate && (
-                    <span className="flex items-center gap-1 text-xs text-gray-400">
-                      <Calendar className="h-3 w-3" />
-                      {new Date(item.dueDate).toLocaleDateString("nl-NL")}
-                    </span>
-                  )}
-                </div>
-                {participantChoices.length > 0 && (
-                  <div className="flex flex-wrap gap-1 pt-0.5">
-                    {participantChoices.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => {
-                          setItems((prev) =>
-                            prev.map((i) =>
-                              i.id === item.id ? { ...i, assignee: p.name } : i
-                            )
-                          );
-                          const map = debounceRef.current;
-                          const prevT = map.get(item.id);
-                          if (prevT) clearTimeout(prevT);
-                          map.delete(item.id);
-                          void flushAssignee(item.id, p.name);
-                        }}
-                        className={cn(
-                          "rounded-md border px-2 py-0.5 text-[11px] transition-colors",
-                          item.assignee === p.name
-                            ? "border-indigo-300 bg-indigo-50 text-indigo-800"
-                            : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                        )}
-                      >
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
+
+              <span className={cn(
+                "flex-1 min-w-0 truncate text-sm",
+                item.completed ? "line-through text-gray-400" : "font-medium text-gray-800"
+              )}>
+                {item.title}
+              </span>
+
+              <div className="flex flex-shrink-0 items-center gap-1.5">
+                {item.assignee && (
+                  <span className="hidden rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600 sm:block">
+                    {item.assignee.split(" ")[0]}
+                  </span>
+                )}
+                {item.dueDate && (
+                  <span className={cn(
+                    "hidden rounded-full px-2 py-0.5 text-[11px] sm:block",
+                    overdue ? "bg-red-100 text-red-600" : "bg-gray-100 text-gray-600"
+                  )}>
+                    {new Date(item.dueDate).toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}
+                  </span>
                 )}
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
 
+              <ChevronDown className={cn(
+                "h-3.5 w-3.5 flex-shrink-0 text-gray-300 transition-transform duration-200",
+                expanded && "rotate-180 text-indigo-400"
+              )} />
+            </div>
+
+            {/* Expanded detail */}
+            {expanded && (
+              <div className="px-4 pb-4 pt-1">
+                <div className="mb-4 border-t border-gray-100 pt-4">
+                  <textarea
+                    value={item.title}
+                    onChange={(e) => updateField(item.id, { title: e.target.value })}
+                    rows={2}
+                    className="w-full resize-none bg-transparent text-base font-semibold text-gray-900 focus:outline-none leading-snug"
+                  />
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {/* Assignee */}
+                  <div className="flex items-center gap-2.5 rounded-lg bg-gray-50 px-3 py-2.5">
+                    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-white shadow-sm">
+                      <User className="h-3.5 w-3.5 text-gray-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Actiehouder</p>
+                      <Select
+                        value={item.assignee || "__none__"}
+                        onValueChange={(val) => updateField(item.id, { assignee: val === "__none__" ? null : val })}
+                      >
+                        <SelectTrigger className="mt-0.5 h-auto border-0 bg-transparent p-0 text-sm font-medium text-gray-800 shadow-none focus:ring-0">
+                          <SelectValue placeholder="Niemand" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Niemand</SelectItem>
+                          {participantChoices.map((p) => (
+                            <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Due date */}
+                  <div className="flex items-center gap-2.5 rounded-lg bg-gray-50 px-3 py-2.5">
+                    <div className={cn("flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full shadow-sm", overdue ? "bg-red-100" : "bg-white")}>
+                      <Calendar className={cn("h-3.5 w-3.5", overdue ? "text-red-500" : "text-gray-400")} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Deadline</p>
+                      <Input
+                        type="date"
+                        value={item.dueDate ? item.dueDate.slice(0, 10) : ""}
+                        onChange={(e) => updateField(item.id, { dueDate: e.target.value ? new Date(e.target.value).toISOString() : null })}
+                        className="mt-0.5 h-auto border-0 bg-transparent p-0 text-sm font-medium text-gray-800 shadow-none focus-visible:ring-0 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Description */}
+                <div className="mt-3 flex items-start gap-2.5 rounded-lg bg-gray-50 px-3 py-2.5">
+                  <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-white shadow-sm mt-0.5">
+                    <AlignLeft className="h-3.5 w-3.5 text-gray-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Omschrijving</p>
+                    <Textarea
+                      placeholder="Voeg een omschrijving toe..."
+                      value={item.description || ""}
+                      onChange={(e) => updateField(item.id, { description: e.target.value || null })}
+                      rows={2}
+                      className="mt-0.5 resize-none border-0 bg-transparent p-0 text-sm text-gray-700 shadow-none focus-visible:ring-0 placeholder:text-gray-400"
+                    />
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="mt-3 flex items-center justify-between">
+                  <button
+                    onClick={(e) => toggleItem(item.id, e)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
+                      item.completed
+                        ? "bg-green-100 text-green-700 hover:bg-green-200"
+                        : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
+                    )}
+                  >
+                    {item.completed
+                      ? <><Check className="h-3 w-3" />Afgerond</>
+                      : <><Square className="h-3 w-3" />Markeer als afgerond</>}
+                  </button>
+
+                  <button
+                    onClick={() => deleteItem(item.id)}
+                    disabled={deleting === item.id}
+                    className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors disabled:opacity-40"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {deleting === item.id ? "…" : "Verwijderen"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Add new */}
       {adding ? (
-        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50/50 p-3">
+        <div className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-white px-3 py-2 shadow-sm">
+          <Square className="h-4 w-4 flex-shrink-0 text-gray-300" />
           <Input
+            autoFocus
+            placeholder="Actiepunt..."
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
-            placeholder="Actiepunt…"
-            className="h-8 text-sm"
-            autoFocus
+            className="h-7 flex-1 border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
             onKeyDown={(e) => {
               if (e.key === "Enter") addItem();
-              if (e.key === "Escape") setAdding(false);
+              if (e.key === "Escape") { setNewTitle(""); setAdding(false); }
             }}
           />
-          <div className="flex items-center gap-2">
-            <User className="h-4 w-4 shrink-0 text-gray-400" />
-            <Input
-              value={newAssignee}
-              onChange={(e) => setNewAssignee(e.target.value)}
-              placeholder="Toegewezen aan (optioneel, vrije naam)"
-              className="h-8 flex-1 text-sm"
-              list={participantChoices.length ? datalistId : undefined}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") addItem();
-              }}
-            />
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={addItem} className="h-8">
-              Toevoegen
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setAdding(false)} className="h-8">
-              Annuleren
-            </Button>
-          </div>
+          <button onClick={addItem} disabled={!newTitle.trim()} className="text-xs font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-40">
+            Toevoegen
+          </button>
+          <button onClick={() => { setNewTitle(""); setAdding(false); }} className="text-gray-400 hover:text-gray-600">
+            <X className="h-4 w-4" />
+          </button>
         </div>
       ) : (
         <button
-          type="button"
           onClick={() => setAdding(true)}
-          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg p-2 w-full"
+          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-gray-400 hover:bg-gray-50 hover:text-gray-600 transition-colors"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-3.5 w-3.5" />
           Actie toevoegen
         </button>
       )}
