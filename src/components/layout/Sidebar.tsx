@@ -218,7 +218,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
                   <button
                     type="button"
                     onClick={async () => {
-                      const name = prompt("Folder name:");
+                      const name = prompt("Mapnaam:");
                       if (!name) return;
                       await fetch("/api/folders", {
                         method: "POST",
@@ -231,7 +231,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-gray-400 hover:bg-gray-100 hover:text-gray-600 md:py-2"
                   >
                     <Plus className="h-4 w-4" />
-                    New Folder
+                    Nieuwe map
                   </button>
                 </div>
               )}
@@ -253,7 +253,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
           )}
         >
           <Settings className="h-4 w-4" />
-          Settings
+          Instellingen
         </Link>
       </div>
     </aside>

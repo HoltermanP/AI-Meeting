@@ -23,7 +23,7 @@ const PLATFORMS = [
   { value: "teams", label: "Microsoft Teams" },
   { value: "slack", label: "Slack" },
   { value: "webex", label: "Webex" },
-  { value: "other", label: "Other / In-person" },
+  { value: "other", label: "Overig / fysiek" },
 ];
 
 export default function NewMeetingDialog({ open, onClose, defaultProjectId }: Props) {
