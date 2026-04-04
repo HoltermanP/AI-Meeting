@@ -14,9 +14,9 @@ export default async function DashboardPage() {
 
   const userId = session.user.id;
 
-  const [recentMeetingsRaw, stats] = await Promise.all([
+  const [recentMeetingsRaw, scheduledMeetings, projects, stats] = await Promise.all([
     prisma.meeting.findMany({
-      where: { userId },
+      where: { userId, status: { not: "scheduled" } },
       include: {
         notes: { select: { summary: true } },
         participants: { select: { id: true, name: true } },
@@ -26,6 +26,16 @@ export default async function DashboardPage() {
       },
       orderBy: { createdAt: "desc" },
       take: 6,
+    }),
+    prisma.meeting.findMany({
+      where: { userId, status: "scheduled" },
+      select: { id: true, title: true, scheduledAt: true, project: { select: { id: true, name: true, color: true } } },
+      orderBy: { scheduledAt: "asc" },
+    }),
+    prisma.project.findMany({
+      where: { userId },
+      select: { id: true, name: true, color: true },
+      orderBy: { createdAt: "desc" },
     }),
     Promise.all([
       prisma.meeting.count({ where: { userId } }),
@@ -50,35 +60,17 @@ export default async function DashboardPage() {
       <div className="mx-auto max-w-6xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6">
         {/* Stats */}
         <div className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-          <StatCard icon={<FileText className="h-5 w-5 text-indigo-600" />} label="Total Meetings" value={total} bg="bg-indigo-50" />
-          <StatCard icon={<Mic className="h-5 w-5 text-green-600" />} label="Completed" value={completed} bg="bg-green-50" />
-          <StatCard icon={<CheckSquare className="h-5 w-5 text-orange-600" />} label="Pending Tasks" value={pendingActions} bg="bg-orange-50" />
-          <StatCard icon={<Clock className="h-5 w-5 text-purple-600" />} label="Total Time" value={formatDuration(totalSeconds)} bg="bg-purple-50" />
+          <StatCard icon={<FileText className="h-5 w-5 text-indigo-600" />} label="Totaal meetings" value={total} bg="bg-indigo-50" />
+          <StatCard icon={<Mic className="h-5 w-5 text-green-600" />} label="Afgerond" value={completed} bg="bg-green-50" />
+          <StatCard icon={<CheckSquare className="h-5 w-5 text-orange-600" />} label="Open acties" value={pendingActions} bg="bg-orange-50" />
+          <StatCard icon={<Clock className="h-5 w-5 text-purple-600" />} label="Totale tijd" value={formatDuration(totalSeconds)} bg="bg-purple-50" />
         </div>
 
-        {/* Recent meetings */}
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-base font-semibold text-gray-900">Recent Meetings</h2>
-          <DashboardClient />
-        </div>
-
-        {recentMeetings.length === 0 ? (
-          <div className="flex flex-col items-center gap-4 rounded-xl border-2 border-dashed border-gray-200 p-8 text-center sm:p-12">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-50">
-              <Mic className="h-8 w-8 text-indigo-400" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-700">No meetings yet</h3>
-              <p className="text-sm text-gray-400 mt-1">Start recording your first meeting to get AI-powered notes</p>
-            </div>
-          </div>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {recentMeetings.map((m) => (
-              <MeetingCard key={m.id} meeting={m as any} />
-            ))}
-          </div>
-        )}
+        <DashboardClient
+          scheduledMeetings={scheduledMeetings as any}
+          recentMeetings={recentMeetings as any}
+          projects={projects}
+        />
       </div>
     </MainLayout>
   );

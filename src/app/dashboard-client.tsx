@@ -1,20 +1,130 @@
 "use client";
 
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import Link from "next/link";
+import { Plus, CalendarPlus, Calendar, Play, Briefcase, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import MeetingCard from "@/components/meeting/MeetingCard";
 import NewMeetingDialog from "@/components/meeting/NewMeetingDialog";
+import PlanFromDashboardDialog from "@/components/meeting/PlanFromDashboardDialog";
 
-export default function DashboardClient() {
-  const [open, setOpen] = useState(false);
+type ScheduledMeeting = {
+  id: string;
+  title: string;
+  scheduledAt: string | null;
+  project: { id: string; name: string; color: string } | null;
+};
+
+type Project = { id: string; name: string; color: string };
+
+type Props = {
+  scheduledMeetings: ScheduledMeeting[];
+  recentMeetings: any[];
+  projects: Project[];
+};
+
+export default function DashboardClient({ scheduledMeetings: initial, recentMeetings, projects }: Props) {
+  const [openNew, setOpenNew] = useState(false);
+  const [openPlan, setOpenPlan] = useState(false);
+  const [scheduled, setScheduled] = useState(initial);
 
   return (
     <>
-      <Button onClick={() => setOpen(true)} size="sm" className="gap-2">
-        <Plus className="h-4 w-4" />
-        New Meeting
-      </Button>
-      <NewMeetingDialog open={open} onClose={() => setOpen(false)} />
+      {/* Geplande vergaderingen */}
+      {scheduled.length > 0 && (
+        <div className="mb-8">
+          <h2 className="mb-3 text-base font-semibold text-gray-900">Geplande vergaderingen</h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {scheduled.map((m) => (
+              <div key={m.id} className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-violet-50 p-4">
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Calendar className="h-3.5 w-3.5 text-indigo-500" />
+                    <span className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Gepland</span>
+                  </div>
+                  {m.project && (
+                    <span className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ backgroundColor: m.project.color + "20", color: m.project.color }}>
+                      <Briefcase className="h-3 w-3" />
+                      {m.project.name}
+                    </span>
+                  )}
+                </div>
+                <p className="mb-1 font-semibold text-gray-900 leading-snug">{m.title}</p>
+                {m.scheduledAt && (
+                  <p className="text-sm text-indigo-700">
+                    {new Date(m.scheduledAt).toLocaleString("nl-NL", {
+                      weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+                    })}
+                  </p>
+                )}
+                <div className="mt-3">
+                  <Link href={`/meetings/${m.id}`}>
+                    <Button size="sm" className="w-full gap-2 bg-indigo-600 hover:bg-indigo-700">
+                      <Play className="h-3.5 w-3.5" />
+                      Openen
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Header recente meetings + knoppen */}
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-base font-semibold text-gray-900">Recente meetings</h2>
+        <div className="flex gap-2">
+          <Button onClick={() => setOpenPlan(true)} size="sm" variant="outline" className="gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50">
+            <CalendarPlus className="h-4 w-4" />
+            Plannen
+          </Button>
+          <Button onClick={() => setOpenNew(true)} size="sm" className="gap-2">
+            <Plus className="h-4 w-4" />
+            Nieuwe meeting
+          </Button>
+        </div>
+      </div>
+
+      {/* Recente meetings grid */}
+      {recentMeetings.length === 0 ? (
+        <div className="flex flex-col items-center gap-4 rounded-xl border-2 border-dashed border-gray-200 p-8 text-center sm:p-12">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-50">
+            <Mic className="h-8 w-8 text-indigo-400" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-gray-700">Nog geen meetings</h3>
+            <p className="mt-1 text-sm text-gray-400">Start een opname of plan een vergadering</p>
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {recentMeetings.map((m) => (
+            <MeetingCard key={m.id} meeting={m} />
+          ))}
+        </div>
+      )}
+
+      <NewMeetingDialog open={openNew} onClose={() => setOpenNew(false)} />
+
+      {openPlan && (
+        <PlanFromDashboardDialog
+          projects={projects}
+          onClose={() => setOpenPlan(false)}
+          onCreated={(meeting) => {
+            setScheduled((prev) => [
+              {
+                id: meeting.id,
+                title: meeting.title,
+                scheduledAt: meeting.scheduledAt || null,
+                project: meeting.projectId ? (projects.find((p) => p.id === meeting.projectId) ?? null) : null,
+              },
+              ...prev,
+            ]);
+            setOpenPlan(false);
+          }}
+        />
+      )}
     </>
   );
 }
