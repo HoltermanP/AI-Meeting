@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -57,9 +58,9 @@ export default async function DashboardPage() {
       <div className="mx-auto max-w-6xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6">
         {/* Stats */}
         <div className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
-          <StatCard icon={<FileText className="h-5 w-5 text-indigo-600" />} label="Totaal meetings" value={total} bg="bg-indigo-50" />
-          <StatCard icon={<Mic className="h-5 w-5 text-green-600" />} label="Afgerond" value={completed} bg="bg-green-50" />
-          <StatCard icon={<CheckSquare className="h-5 w-5 text-orange-600" />} label="Open acties" value={pendingActions} bg="bg-orange-50" />
+          <StatCard icon={<FileText className="h-5 w-5 text-indigo-600" />} label="Totaal meetings" value={total} bg="bg-indigo-50" href="/meetings" />
+          <StatCard icon={<Mic className="h-5 w-5 text-green-600" />} label="Afgerond" value={completed} bg="bg-green-50" href="/meetings?status=completed" />
+          <StatCard icon={<CheckSquare className="h-5 w-5 text-orange-600" />} label="Open acties" value={pendingActions} bg="bg-orange-50" href="/meetings" />
         </div>
 
         <DashboardClient
@@ -73,20 +74,23 @@ export default async function DashboardPage() {
 }
 
 function StatCard({
-  icon, label, value, bg,
+  icon, label, value, bg, href,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string | number;
   bg: string;
+  href: string;
 }) {
   return (
-    <div className={`rounded-xl border border-gray-200 bg-white p-3 sm:p-4`}>
-      <div className={`mb-2 inline-flex h-9 w-9 items-center justify-center rounded-lg sm:mb-3 sm:h-10 sm:w-10 ${bg}`}>
-        {icon}
+    <Link href={href} className="group block">
+      <div className="rounded-xl border border-gray-200 bg-white p-3 transition-all hover:border-indigo-200 hover:shadow-md sm:p-4">
+        <div className={`mb-2 inline-flex h-9 w-9 items-center justify-center rounded-lg sm:mb-3 sm:h-10 sm:w-10 ${bg}`}>
+          {icon}
+        </div>
+        <p className="text-xl font-bold text-gray-900 sm:text-2xl">{value}</p>
+        <p className="mt-0.5 text-xs text-gray-500 sm:text-sm">{label}</p>
       </div>
-      <p className="text-xl font-bold text-gray-900 sm:text-2xl">{value}</p>
-      <p className="mt-0.5 text-xs text-gray-500 sm:text-sm">{label}</p>
-    </div>
+    </Link>
   );
 }
