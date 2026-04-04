@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Mic, MicOff, Pause, Play, Square, Loader2, Monitor, AppWindow } from "lucide-react";
+import { Mic, MicOff, Pause, Play, Square, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDuration } from "@/lib/utils";
 import type { RecordingState } from "@/types";
@@ -54,7 +53,7 @@ const CHUNK_AFTER_SECONDS = 30 * 60;
 const CHUNK_INTERVAL_MS = 1000;
 
 export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscript }: Props) {
-  const [captureMode, setCaptureMode] = useState<AudioCaptureMode>("system");
+  const captureMode: AudioCaptureMode = "system";
   const [state, setState] = useState<RecordingState>("idle");
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0);
@@ -260,17 +259,15 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       return;
     }
     try {
-      if (captureMode !== "mic") {
-        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mic.getTracks().forEach((t) => t.stop());
-      }
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mic.getTracks().forEach((t) => t.stop());
     } catch {
       setSpeechHint("Geen microfoontoestemming — live tekst heeft een microfoon (naast tab-/schermgeluid).");
       return;
     }
     setLiveSpeechUserStarted(true);
     startSpeechRecognition(true);
-  }, [captureMode, getSpeechCtor, startSpeechRecognition]);
+  }, [getSpeechCtor, startSpeechRecognition]);
 
   const start = useCallback(async () => {
     setError(null);
@@ -280,50 +277,36 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
     try {
       let stream: MediaStream;
 
-      if (captureMode === "mic") {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      } else {
-        // Tab-audio: kies "Chrome-tab" + vink "Geluid delen" aan.
-        // Systeem-audio: kies "Scherm" of "Venster" + vink "Geluid delen" aan (waar ondersteund).
-        let displayStream: MediaStream;
-        try {
-          displayStream = await navigator.mediaDevices.getDisplayMedia({
-            video:
-              captureMode === "tab"
-                ? { displaySurface: "browser" }
-                : { displaySurface: "monitor" },
-            audio: true,
-          });
-        } catch {
-          displayStream = await navigator.mediaDevices.getDisplayMedia({
-            video: true,
-            audio: true,
-          });
-        }
-        displayStreamRef.current = displayStream;
-
-        const audioTracks = displayStream.getAudioTracks();
-        if (audioTracks.length === 0) {
-          displayStream.getTracks().forEach((t) => t.stop());
-          displayStreamRef.current = null;
-          setError(
-            captureMode === "tab"
-              ? "Geen tab-audio: kies opnieuw een tabblad en vink 'Geluid delen' / 'Share audio' aan."
-              : "Geen systeem-audio: kies scherm of venster en vink 'Geluid delen' aan (macOS/Chrome ondersteunt dit niet overal — probeer tab-audio als de call in de browser loopt)."
-          );
-          return;
-        }
-
-        stream = new MediaStream([...audioTracks]);
-        // Video niet meteen stoppen: op sommige browsers blijft audio dan stabieler
-        displayStream.getVideoTracks().forEach((t) => {
-          t.onended = () => {
-            if (mediaRecorderRef.current?.state === "recording") {
-              mediaRecorderRef.current.stop();
-            }
-          };
+      let displayStream: MediaStream;
+      try {
+        displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { displaySurface: "monitor" },
+          audio: true,
+        });
+      } catch {
+        displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: true,
         });
       }
+      displayStreamRef.current = displayStream;
+
+      const audioTracks = displayStream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        displayStream.getTracks().forEach((t) => t.stop());
+        displayStreamRef.current = null;
+        setError("Geen systeem-audio: kies scherm of venster en vink 'Geluid delen' aan.");
+        return;
+      }
+
+      stream = new MediaStream([...audioTracks]);
+      displayStream.getVideoTracks().forEach((t) => {
+        t.onended = () => {
+          if (mediaRecorderRef.current?.state === "recording") {
+            mediaRecorderRef.current.stop();
+          }
+        };
+      });
 
       streamRef.current = stream;
 
@@ -352,17 +335,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
 
       startVolumeMonitor(stream);
 
-      /* Alleen microfoon: geen getDisplayMedia → user activation blijft vaak bruikbaar voor Web Speech. */
-      if (captureMode === "mic") {
-        const Ctor = getSpeechCtor();
-        if (Ctor) {
-          setLiveSpeechUserStarted(true);
-          startSpeechRecognition(true);
-        }
-      } else {
-        /* Streaming transcription para tab/system audio */
-        startStreamTranscription();
-      }
+      startStreamTranscription();
 
       await fetch(`/api/meetings/${meetingId}`, {
         method: "PUT",
@@ -379,9 +352,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
     }
   }, [
     meetingId,
-    captureMode,
-    getSpeechCtor,
-    startSpeechRecognition,
     clearChunkRequestInterval,
     maybeStartLongRecordingChunking,
   ]);
@@ -400,8 +370,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       const rec = mediaRecorderRef.current;
       const chunks = chunksRef.current;
 
-      // Solo transcribir si no es solo micrófono (donde usamos Web Speech API)
-      if (rec?.state !== "recording" || captureMode === "mic" || chunks.length === 0) {
+      if (rec?.state !== "recording" || chunks.length === 0) {
         return;
       }
 
@@ -433,7 +402,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
         console.error("Stream transcription error:", err);
       }
     }, 8000); // Transcribir cada 8 segundos
-  }, [captureMode, meetingId, onLiveTranscript]);
+  }, [meetingId, onLiveTranscript]);
 
   const stopStreamTranscription = useCallback(() => {
     if (streamTranscriptIntervalRef.current) {
@@ -458,7 +427,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
     if (mediaRecorderRef.current?.state === "paused") {
       mediaRecorderRef.current.resume();
       if (liveSpeechUserStarted) startSpeechRecognition(false);
-      if (captureMode !== "mic") startStreamTranscription();
+      startStreamTranscription();
       setState("recording");
       const pausedAt = Date.now() - duration * 1000;
       timerRef.current = setInterval(() => {
@@ -468,7 +437,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       }, 1000);
       if (streamRef.current) startVolumeMonitor(streamRef.current);
     }
-  }, [duration, startSpeechRecognition, liveSpeechUserStarted, maybeStartLongRecordingChunking, captureMode, startStreamTranscription]);
+  }, [duration, startSpeechRecognition, liveSpeechUserStarted, maybeStartLongRecordingChunking, startStreamTranscription]);
 
   const stop = useCallback(async () => {
     if (!mediaRecorderRef.current) return;
@@ -496,53 +465,27 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       body: JSON.stringify({ endedAt: new Date().toISOString(), duration }),
     });
 
-    const formData = new FormData();
-    formData.append("audio", blob, "recording.webm");
-    formData.append("mimeType", mimeType);
-    formData.append("liveTranscript", latestLiveTranscriptRef.current.trim());
-
     const progressInterval = setInterval(() => {
       setProgress((p) => Math.min(90, p + 5));
     }, 500);
 
     try {
-      // Para tab/sistema: finalizar en endpoint de streaming
-      if (captureMode !== "mic") {
-        const streamFormData = new FormData();
-        streamFormData.append("audio", blob, "recording.webm");
-        streamFormData.append("mimeType", mimeType);
-        streamFormData.append("isLast", "true");
+      const streamFormData = new FormData();
+      streamFormData.append("audio", blob, "recording.webm");
+      streamFormData.append("mimeType", mimeType);
+      streamFormData.append("isLast", "true");
 
-        const streamRes = await fetch(`/api/meetings/${meetingId}/transcribe-stream`, {
-          method: "POST",
-          body: streamFormData,
-        });
-        if (!streamRes.ok) throw new Error("Transcriptie mislukt");
-        const streamData = await streamRes.json();
-        
-        clearInterval(progressInterval);
-        setProgress(100);
-        setState("done");
-        onTranscribed(streamData.transcript || "", "", {
-          provisional: false,
-        });
-      } else {
-        // Para micrófono: usar endpoint normal
-        const res = await fetch(`/api/meetings/${meetingId}/transcribe`, {
-          method: "POST",
-          body: formData,
-        });
-        clearInterval(progressInterval);
-        setProgress(100);
+      const streamRes = await fetch(`/api/meetings/${meetingId}/transcribe-stream`, {
+        method: "POST",
+        body: streamFormData,
+      });
+      if (!streamRes.ok) throw new Error("Transcriptie mislukt");
+      const streamData = await streamRes.json();
 
-        if (!res.ok) throw new Error("Transcriptie mislukt");
-        const data = await res.json();
-        setLastProvisional(Boolean(data.provisional));
-        setState("done");
-        onTranscribed(data.transcript?.content || "", data.title || "", {
-          provisional: Boolean(data.provisional),
-        });
-      }
+      clearInterval(progressInterval);
+      setProgress(100);
+      setState("done");
+      onTranscribed(streamData.transcript || "", "", { provisional: false });
     } catch (err: unknown) {
       clearInterval(progressInterval);
       setError(err instanceof Error ? err.message : "Transcriptie mislukt");
@@ -555,7 +498,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
     stopAllStreams,
     stopSpeechRecognition,
     clearChunkRequestInterval,
-    captureMode,
   ]);
 
   useEffect(() => {
@@ -567,35 +509,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       stopAllStreams();
     };
   }, [stopAllStreams, clearChunkRequestInterval, stopStreamTranscription]);
-
-  const modeOptions: {
-    value: AudioCaptureMode;
-    title: string;
-    hint: string;
-    icon: typeof Monitor;
-  }[] = [
-    {
-      value: "system",
-      title: "Systeem-audio",
-      hint:
-        "Kies in het venster **Hele scherm** of **Venster** en zet **geluid delen** aan. Ideaal voor Zoom/Teams **desktop-app** of elk geluid dat op je computer afspeelt.",
-      icon: Monitor,
-    },
-    {
-      value: "tab",
-      title: "Tab-audio",
-      hint:
-        "Kies **Chrome-tabblad** (of Edge-tab) en vink **Geluid delen** aan. Alleen die tab wordt opgenomen — het beste voor **Google Meet / Zoom in de browser** (minder ruis dan hele systeem).",
-      icon: AppWindow,
-    },
-    {
-      value: "mic",
-      title: "Alleen microfoon",
-      hint:
-        "Geen scherm delen. Gebruik bij **fysieke meetings** of als je alleen je eigen stem wilt (headset).",
-      icon: Mic,
-    },
-  ];
 
   if (state === "processing") {
     return (
@@ -635,48 +548,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       {error && (
         <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700 whitespace-pre-wrap">
           {error}
-        </div>
-      )}
-
-      {state === "idle" && (
-        <div className="space-y-3">
-          <Label className="text-base font-semibold text-gray-900">Audio bron</Label>
-          <p className="text-xs text-gray-500">
-            Standaard: systeem-audio. Kies tab-audio als je call in de browser draait — vaak schoner. Microfoon alleen voor live bijeenkomsten.
-          </p>
-          <div className="grid gap-3 sm:grid-cols-1">
-            {modeOptions.map(({ value, title, hint, icon: Icon }) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setCaptureMode(value)}
-                className={cn(
-                  "flex w-full flex-col rounded-lg border-2 p-4 text-left transition-colors",
-                  captureMode === value
-                    ? "border-indigo-600 bg-indigo-50/80"
-                    : "border-gray-200 bg-gray-50/50 hover:border-gray-300"
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className={cn(
-                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
-                      captureMode === value ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-600"
-                    )}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <span className="font-medium text-gray-900">{title}</span>
-                  {value === "system" && (
-                    <span className="ml-auto rounded bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-indigo-700">
-                      Standaard
-                    </span>
-                  )}
-                </div>
-                <p className="mt-2 text-xs leading-relaxed text-gray-600">{hint}</p>
-              </button>
-            ))}
-          </div>
         </div>
       )}
 
@@ -722,7 +593,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
           {state === "idle" && (
             <Button onClick={start} size="lg" className="gap-2">
               <Mic className="h-4 w-4" />
-              {captureMode === "mic" ? "Start opname (microfoon)" : "Start opname (deel scherm/tab)"}
+              Start opname
             </Button>
           )}
 
@@ -752,7 +623,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
           )}
         </div>
 
-        {state !== "idle" && captureMode !== "mic" && (
+        {state !== "idle" && (
           <p className="text-center text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 max-w-md">
             Laat het gedeelde tabblad of venster open tot je op Stop drukt — anders stopt de opname mee.
           </p>
@@ -773,12 +644,10 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
                   Na het delen van je scherm/tab moet je <strong>apart</strong> live spraak starten — anders blokkeert
                   de browser de microfoon voor herkenning. Klik hieronder en geef microfoon toe.
                 </p>
-                {captureMode !== "mic" && (
-                  <p className="text-[11px] text-amber-800 bg-amber-50 rounded px-2 py-1">
-                    Je opname bevat tab-/systeemgeluid; live tekst gebruikt je <strong>microfoon</strong> (eigen stem of
-                    wat je speakers meegeven). Het volledige gesprek volgt via Whisper.
-                  </p>
-                )}
+                <p className="text-[11px] text-amber-800 bg-amber-50 rounded px-2 py-1">
+                  Je opname bevat systeemgeluid; live tekst gebruikt je <strong>microfoon</strong> (eigen stem of
+                  wat je speakers meegeven). Het volledige gesprek volgt via Whisper.
+                </p>
                 <Button
                   type="button"
                   size="sm"
