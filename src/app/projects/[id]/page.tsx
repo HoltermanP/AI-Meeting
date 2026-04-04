@@ -53,6 +53,8 @@ export default function ProjectDetailPage() {
   const [newParticipantName, setNewParticipantName] = useState("");
   const [newParticipantEmail, setNewParticipantEmail] = useState("");
   const [deletingParticipant, setDeletingParticipant] = useState<string | null>(null);
+  const [deletingProject, setDeletingProject] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     loadProject();
@@ -88,6 +90,16 @@ export default function ProjectDetailPage() {
       console.error("Failed to load project:", err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function deleteProject() {
+    setDeletingProject(true);
+    try {
+      const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+      if (res.ok) router.push("/");
+    } finally {
+      setDeletingProject(false);
     }
   }
 
@@ -156,7 +168,7 @@ export default function ProjectDetailPage() {
           <Link href="/" className="text-gray-500 hover:text-gray-700">
             <ArrowLeft className="h-5 w-5" />
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-1 items-center gap-3">
             <div
               className="flex h-10 w-10 items-center justify-center rounded-lg"
               style={{ backgroundColor: project.color + "20", color: project.color }}
@@ -165,6 +177,31 @@ export default function ProjectDetailPage() {
             </div>
             <h1 className="text-2xl font-bold">{project.name}</h1>
           </div>
+          {confirmDelete ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">Zeker weten?</span>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={deletingProject}
+                onClick={deleteProject}
+              >
+                {deletingProject ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verwijderen"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setConfirmDelete(false)}>
+                Annuleren
+              </Button>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-gray-500 hover:text-red-600 hover:border-red-300"
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
 
         {/* Stats */}
