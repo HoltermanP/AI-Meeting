@@ -7,8 +7,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import AssigneeSelect from "@/components/meeting/AssigneeSelect";
 
 type ActionItem = {
   id: string;
@@ -234,20 +234,11 @@ export default function ProjectActionItemsList({ projectId, items: initialItems,
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Actiehouder</p>
-                      <Select
-                        value={item.assignee || "__none__"}
-                        onValueChange={(val) => updateField(item.id, { assignee: val === "__none__" ? null : val })}
-                      >
-                        <SelectTrigger className="mt-0.5 h-auto border-0 bg-transparent p-0 text-sm font-medium text-gray-800 shadow-none focus:ring-0">
-                          <SelectValue placeholder="Niemand" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Niemand</SelectItem>
-                          {participantChoices.map((p) => (
-                            <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <AssigneeSelect
+                        value={item.assignee}
+                        onChange={(val) => updateField(item.id, { assignee: val })}
+                        extraChoices={participantChoices}
+                      />
                     </div>
                   </div>
 
