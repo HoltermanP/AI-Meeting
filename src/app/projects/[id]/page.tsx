@@ -207,6 +207,45 @@ export default function ProjectDetailPage() {
           )}
         </div>
 
+        {/* Plan vergadering knop */}
+        <div className="mb-4">
+          <button
+            onClick={() => setShowPlanDialog(true)}
+            className="flex items-center gap-2 rounded-xl border border-dashed border-indigo-300 bg-indigo-50 px-4 py-2.5 text-sm font-medium text-indigo-600 hover:bg-indigo-100 transition-colors"
+          >
+            <CalendarPlus className="h-4 w-4" />
+            Vergadering plannen
+          </button>
+        </div>
+
+        {/* Geplande vergaderingen */}
+        {meetings.filter((m) => m.status === "scheduled").map((m) => (
+          <div key={m.id} className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Calendar className="h-4 w-4 text-indigo-500" />
+                  <span className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Gepland</span>
+                </div>
+                <p className="font-semibold text-gray-900">{m.title}</p>
+                {m.scheduledAt && (
+                  <p className="mt-0.5 text-sm text-indigo-700">
+                    {new Date(m.scheduledAt).toLocaleString("nl-NL", {
+                      weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit"
+                    })}
+                  </p>
+                )}
+              </div>
+              <Link href={`/meetings/${m.id}`}>
+                <Button size="sm" className="gap-2 shrink-0">
+                  <Play className="h-3.5 w-3.5" />
+                  Openen
+                </Button>
+              </Link>
+            </div>
+          </div>
+        ))}
+
         {/* Stats */}
         <div className="mb-6 grid gap-3 sm:grid-cols-3">
           <div className="rounded-lg border border-gray-200 bg-white p-4">
@@ -319,48 +358,10 @@ export default function ProjectDetailPage() {
 
           {/* Meetings Tab */}
           <TabsContent value="meetings" className="space-y-4">
-            {/* Planned meetings */}
-            {meetings.filter((m) => m.status === "scheduled").map((m) => (
-              <div key={m.id} className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <Calendar className="h-4 w-4 text-indigo-500" />
-                      <span className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Gepland</span>
-                    </div>
-                    <p className="font-semibold text-gray-900">{m.title}</p>
-                    {m.scheduledAt && (
-                      <p className="mt-1 text-sm text-indigo-700">
-                        {new Date(m.scheduledAt).toLocaleString("nl-NL", {
-                          weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit"
-                        })}
-                      </p>
-                    )}
-                  </div>
-                  <Link href={`/meetings/${m.id}`}>
-                    <Button size="sm" className="gap-2 shrink-0">
-                      <Play className="h-3.5 w-3.5" />
-                      Openen
-                    </Button>
-                  </Link>
-                </div>
-              </div>
-            ))}
-
-            {/* Plan button */}
-            <button
-              onClick={() => setShowPlanDialog(true)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white py-4 text-sm text-gray-500 hover:border-indigo-300 hover:text-indigo-600 transition-colors"
-            >
-              <CalendarPlus className="h-4 w-4" />
-              Vergadering plannen
-            </button>
-
-            {/* Past meetings */}
             <div className="rounded-lg border border-gray-200 bg-white p-6">
               <h2 className="mb-4 text-lg font-semibold">Eerdere meetings</h2>
               {meetings.filter((m) => m.status !== "scheduled").length === 0 ? (
-                <p className="text-sm text-gray-500">Nog geen meetings in dit project</p>
+                <p className="text-sm text-gray-500">Nog geen afgeronde meetings in dit project</p>
               ) : (
                 <div className="space-y-2">
                   {meetings.filter((m) => m.status !== "scheduled").map((m) => (
