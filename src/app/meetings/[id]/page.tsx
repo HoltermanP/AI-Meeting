@@ -223,6 +223,33 @@ export default function MeetingDetailPage() {
         useCORS: true,
         logging: false,
         backgroundColor: "#ffffff",
+        onclone: (clonedDoc) => {
+          // Tailwind v4 uses oklch() colors which html2canvas can't parse.
+          // Override all color CSS variables with hex fallbacks.
+          const style = clonedDoc.createElement("style");
+          style.textContent = `
+            :root {
+              --color-white: #ffffff; --color-black: #000000;
+              --color-gray-50: #f9fafb; --color-gray-100: #f3f4f6;
+              --color-gray-200: #e5e7eb; --color-gray-300: #d1d5db;
+              --color-gray-400: #9ca3af; --color-gray-500: #6b7280;
+              --color-gray-600: #4b5563; --color-gray-700: #374151;
+              --color-gray-800: #1f2937; --color-gray-900: #111827;
+              --color-slate-50: #f8fafc; --color-slate-100: #f1f5f9;
+              --color-slate-200: #e2e8f0; --color-slate-300: #cbd5e1;
+              --color-slate-400: #94a3b8; --color-slate-500: #64748b;
+              --color-slate-600: #475569; --color-slate-700: #334155;
+              --color-slate-800: #1e293b; --color-slate-900: #0f172a;
+              --color-indigo-100: #e0e7ff; --color-indigo-500: #6366f1;
+              --color-indigo-600: #4f46e5; --color-indigo-700: #4338ca;
+              --color-blue-500: #3b82f6; --color-blue-600: #2563eb;
+              --color-red-500: #ef4444; --color-red-600: #dc2626;
+              --color-green-500: #22c55e; --color-green-600: #16a34a;
+              --color-yellow-400: #facc15; --color-amber-500: #f59e0b;
+            }
+          `;
+          clonedDoc.head.appendChild(style);
+        },
       });
       const imgData = canvas.toDataURL("image/png", 0.92);
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -322,7 +349,7 @@ const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).len
       {/* Off-screen bron voor PDF (zelfde opmaak als scherm) */}
       {/* PDF: alleen verslag-HTML — zelfde als gekozen format, geen extra titel/datum/actielijst */}
       {meeting?.notes && (
-        <div className="fixed left-[-9999px] top-0 w-[210mm] bg-white p-8 text-gray-900">
+        <div className="fixed left-[-9999px] top-0 w-[210mm] p-8" style={{ backgroundColor: '#ffffff', color: '#111827' }}>
           <div
             ref={pdfSourceRef}
             className="prose prose-slate max-w-none text-[11pt] leading-relaxed [&_h2]:text-[1.15rem] [&_h2]:font-semibold [&_h2]:mt-6 [&_h2]:mb-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5"
