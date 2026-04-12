@@ -24,6 +24,10 @@ import {
   Plus,
   Pencil,
   Trash2,
+  Calendar,
+  RefreshCw,
+  Unlink,
+  Link2,
 } from "lucide-react";
 
 type Template = {
@@ -37,12 +41,19 @@ type Template = {
 
 type MeUser = { id: string; email: string; name: string | null };
 
+type CalendarStatus = { connected: false } | { connected: true; msEmail?: string | null };
+
 export default function SettingsPage() {
   const [me, setMe] = useState<MeUser | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [name, setName] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
+
+  const [calendarStatus, setCalendarStatus] = useState<CalendarStatus | null>(null);
+  const [calendarSyncing, setCalendarSyncing] = useState(false);
+  const [calendarSyncResult, setCalendarSyncResult] = useState<string | null>(null);
+  const [calendarDisconnecting, setCalendarDisconnecting] = useState(false);
 
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
@@ -57,7 +68,63 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadTemplates();
+    loadCalendarStatus();
   }, []);
+
+  // Toon melding als we terugkeren van de OAuth-flow
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const cal = params.get("calendar");
+    if (cal === "connected") {
+      loadCalendarStatus();
+      // Verwijder de query-param uit de URL
+      window.history.replaceState({}, "", "/settings");
+    } else if (cal === "error") {
+      const msg = params.get("msg") ?? "Onbekende fout";
+      alert(`Outlook koppelen mislukt: ${msg}`);
+      window.history.replaceState({}, "", "/settings");
+    }
+  }, []);
+
+  async function loadCalendarStatus() {
+    try {
+      const r = await fetch("/api/calendar/status");
+      if (r.ok) setCalendarStatus(await r.json());
+    } catch { /* ignore */ }
+  }
+
+  async function handleCalendarSync() {
+    setCalendarSyncing(true);
+    setCalendarSyncResult(null);
+    try {
+      const r = await fetch("/api/calendar/sync", { method: "POST" });
+      const data = await r.json() as { created?: number; skipped?: number; error?: string };
+      if (!r.ok) {
+        setCalendarSyncResult(`Fout: ${data.error ?? r.status}`);
+      } else {
+        setCalendarSyncResult(
+          `${data.created} nieuw geïmporteerd, ${data.skipped} overgeslagen (al aanwezig).`
+        );
+      }
+    } catch {
+      setCalendarSyncResult("Synchronisatie mislukt.");
+    } finally {
+      setCalendarSyncing(false);
+    }
+  }
+
+  async function handleCalendarDisconnect() {
+    if (!confirm("Outlook-koppeling verbreken? Bestaande meetings blijven bewaard.")) return;
+    setCalendarDisconnecting(true);
+    try {
+      await fetch("/api/calendar/disconnect", { method: "DELETE" });
+      setCalendarStatus({ connected: false });
+      setCalendarSyncResult(null);
+    } finally {
+      setCalendarDisconnecting(false);
+    }
+  }
 
   useEffect(() => {
     fetch("/api/me")
@@ -367,6 +434,101 @@ export default function SettingsPage() {
                 placeholder="sk-..."
               />
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Microsoft 365 / Outlook kalenderintegratie */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-indigo-600" />
+              Microsoft 365 / Outlook
+            </CardTitle>
+            <CardDescription>
+              Koppel je Outlook-agenda voor automatische synchronisatie. Geplande meetings
+              verschijnen in Outlook; Teams-meetings krijgen een deelname-link.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {calendarStatus === null ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Status laden…
+              </div>
+            ) : calendarStatus.connected ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+                  <Check className="h-4 w-4 text-green-600" />
+                  <span className="text-sm font-medium text-green-800">
+                    Verbonden
+                    {calendarStatus.msEmail ? ` als ${calendarStatus.msEmail}` : ""}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={handleCalendarSync}
+                    disabled={calendarSyncing}
+                  >
+                    {calendarSyncing ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    Synchroniseer van Outlook
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-2 text-destructive hover:border-destructive/30"
+                    onClick={handleCalendarDisconnect}
+                    disabled={calendarDisconnecting}
+                  >
+                    {calendarDisconnecting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Unlink className="h-4 w-4" />
+                    )}
+                    Verbinding verbreken
+                  </Button>
+                </div>
+
+                {calendarSyncResult && (
+                  <p className="text-sm text-muted-foreground">{calendarSyncResult}</p>
+                )}
+
+                <p className="text-xs text-muted-foreground">
+                  Nieuwe meetings die je in de app plant, worden automatisch als
+                  Outlook-agenda-item aangemaakt. Verwijder je een meeting, dan verdwijnt het
+                  agenda-item ook.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Nog niet gekoppeld. Na verbinden worden geplande meetings automatisch
+                  gesynchroniseerd met je Outlook-agenda.
+                </p>
+                <Button
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => { window.location.href = "/api/calendar/connect"; }}
+                >
+                  <Link2 className="h-4 w-4" />
+                  Verbinden met Outlook
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Vereist: <code className="bg-muted px-1 rounded">MICROSOFT_CLIENT_ID</code>,{" "}
+                  <code className="bg-muted px-1 rounded">MICROSOFT_CLIENT_SECRET</code> en{" "}
+                  <code className="bg-muted px-1 rounded">MICROSOFT_TENANT_ID</code> in{" "}
+                  <code className="bg-muted px-1 rounded">.env</code>.
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 

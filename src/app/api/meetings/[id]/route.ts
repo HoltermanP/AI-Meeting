@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { findActionItemsForMeeting } from "@/lib/meeting-action-items";
+import {
+  isMsConnected,
+  createOutlookEvent,
+  updateOutlookEvent,
+  deleteOutlookEvent,
+} from "@/lib/microsoft-graph";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -64,6 +70,14 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     }
   }
 
+  // Bereken nieuwe scheduledAt alvast (voor Outlook-sync)
+  const newScheduledAt =
+    body.scheduledAt !== undefined
+      ? body.scheduledAt
+        ? new Date(body.scheduledAt)
+        : null
+      : undefined;
+
   const updated = await prisma.meeting.update({
     where: { id },
     data: {
@@ -76,9 +90,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       ...(body.endedAt !== undefined && { endedAt: body.endedAt }),
       ...(body.duration !== undefined && { duration: body.duration }),
       ...(templateId !== undefined && { templateId }),
-      ...(body.scheduledAt !== undefined && { scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : null }),
+      ...(newScheduledAt !== undefined && { scheduledAt: newScheduledAt }),
       ...(body.agenda !== undefined && { agenda: body.agenda }),
     },
+    include: { participants: true },
   });
 
   if (projectIdUpdate !== undefined) {
@@ -86,6 +101,47 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       where: { meetingId: id },
       data: { projectId: projectIdUpdate },
     });
+  }
+
+  // --- Outlook push-sync (best-effort, blokkeert respons niet bij fout) ---
+  if (await isMsConnected(session.user.id).catch(() => false)) {
+    const eventInput = {
+      title: updated.title,
+      scheduledAt: updated.scheduledAt ?? new Date(),
+      participants: updated.participants,
+      agenda: updated.agenda ?? null,
+      platform: updated.platform ?? null,
+    };
+
+    try {
+      if (newScheduledAt === null && meeting.outlookEventId) {
+        // scheduledAt verwijderd → event verwijderen
+        await deleteOutlookEvent(session.user.id, meeting.outlookEventId);
+        await prisma.meeting.update({
+          where: { id },
+          data: { outlookEventId: null, teamsJoinUrl: null },
+        });
+      } else if (newScheduledAt && !meeting.outlookEventId) {
+        // Nieuw gepland → event aanmaken
+        const result = await createOutlookEvent(session.user.id, eventInput);
+        await prisma.meeting.update({
+          where: { id },
+          data: { outlookEventId: result.id, teamsJoinUrl: result.joinUrl ?? null },
+        });
+      } else if (newScheduledAt && meeting.outlookEventId) {
+        // Bestaand event bijwerken
+        await updateOutlookEvent(session.user.id, meeting.outlookEventId, eventInput);
+      } else if (!newScheduledAt && meeting.outlookEventId && body.title !== undefined) {
+        // Alleen titel/platform/agenda gewijzigd maar meeting heeft nog wel een event
+        await updateOutlookEvent(session.user.id, meeting.outlookEventId, {
+          ...eventInput,
+          scheduledAt: meeting.scheduledAt ?? new Date(),
+        });
+      }
+    } catch (err) {
+      // Outlook-fout mag de API-respons niet breken
+      console.error("Outlook sync mislukt:", err);
+    }
   }
 
   return NextResponse.json(updated);
@@ -99,6 +155,15 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const meeting = await prisma.meeting.findFirst({ where: { id, userId: session.user.id } });
   if (!meeting) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // Verwijder Outlook-event als dat gekoppeld is (best-effort)
+  if (meeting.outlookEventId) {
+    try {
+      await deleteOutlookEvent(session.user.id, meeting.outlookEventId);
+    } catch (err) {
+      console.error("Outlook-event verwijderen mislukt:", err);
+    }
+  }
 
   await prisma.$transaction([
     prisma.actionItem.deleteMany({ where: { meetingId: id, projectId: null } }),

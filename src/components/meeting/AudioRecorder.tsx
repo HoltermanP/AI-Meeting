@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Mic, MicOff, Pause, Play, Square, Loader2, Monitor, Users } from "lucide-react";
+import { Mic, MicOff, Pause, Play, Square, Loader2, Monitor, Users, RefreshCw, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -79,6 +79,8 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
   const [speechStatus, setSpeechStatus] = useState<"off" | "listening" | "error">("off");
   const [speechHint, setSpeechHint] = useState<string | null>(null);
   const [lastProvisional, setLastProvisional] = useState(false);
+  const [availableMics, setAvailableMics] = useState<MediaDeviceInfo[]>([]);
+  const [selectedMicId, setSelectedMicId] = useState<string>("");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const liveSpeechFinalRef = useRef("");
@@ -159,11 +161,31 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
         ? "audio/ogg"
         : "audio/webm";
 
+  const loadMics = useCallback(async () => {
+    try {
+      // Vraag eerst toestemming zodat device-labels zichtbaar zijn
+      const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tempStream.getTracks().forEach((t) => t.stop());
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter((d) => d.kind === "audioinput");
+      setAvailableMics(mics);
+      // Selecteer standaard de eerste als er nog niets geselecteerd is
+      if (!selectedMicId && mics.length > 0) {
+        setSelectedMicId(mics[0].deviceId);
+      }
+    } catch {
+      // Geen toestemming of niet beschikbaar — stil falen
+    }
+  }, [selectedMicId]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const w = window as unknown as { SpeechRecognition?: SpeechRecCtor; webkitSpeechRecognition?: SpeechRecCtor };
     setSpeechAvailable(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
-  }, []);
+    loadMics();
+    navigator.mediaDevices.addEventListener("devicechange", loadMics);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", loadMics);
+  }, [loadMics]);
 
   const getSpeechCtor = useCallback((): SpeechRecCtor | null => {
     if (typeof window === "undefined") return null;
@@ -233,7 +255,8 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       return;
     }
     try {
-      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const micConstraints: MediaTrackConstraints = selectedMicId ? { deviceId: { exact: selectedMicId } } : {};
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: micConstraints });
       mic.getTracks().forEach((t) => t.stop());
     } catch {
       setSpeechHint("Geen microfoontoestemming — live tekst heeft een microfoon.");
@@ -294,9 +317,13 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     try {
       let recordStream: MediaStream;
 
+      const micConstraints: MediaTrackConstraints = selectedMicId
+        ? { deviceId: { exact: selectedMicId } }
+        : {};
+
       if (mode === "physical") {
         // Alleen microfoon (fysieke meeting)
-        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints, video: false });
         micStreamRef.current = micStream;
         recordStream = micStream;
 
@@ -321,7 +348,7 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
           t.onended = () => { if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop(); };
         });
 
-        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints, video: false });
         micStreamRef.current = micStream;
 
         const audioCtx = new AudioContext();
@@ -590,6 +617,34 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
         {/* Modus-keuze (alleen in idle) */}
         {state === "idle" && (
           <div className="w-full max-w-lg space-y-3">
+            {/* Microfoon-selector */}
+            {availableMics.length > 0 && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-gray-600 shrink-0">Microfoon</label>
+                <div className="relative flex-1">
+                  <select
+                    value={selectedMicId}
+                    onChange={(e) => setSelectedMicId(e.target.value)}
+                    className="w-full appearance-none rounded-lg border border-gray-200 bg-white py-1.5 pl-3 pr-8 text-xs text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                  >
+                    {availableMics.map((mic) => (
+                      <option key={mic.deviceId} value={mic.deviceId}>
+                        {mic.label || `Microfoon ${mic.deviceId.slice(0, 8)}`}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                </div>
+                <button
+                  type="button"
+                  onClick={loadMics}
+                  title="Ververs apparaten"
+                  className="shrink-0 rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:border-indigo-300 hover:text-indigo-600"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
             <p className="text-center text-sm font-medium text-gray-700">Hoe wil je opnemen?</p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {(

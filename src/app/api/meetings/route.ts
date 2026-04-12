@@ -45,8 +45,15 @@ export async function GET(req: Request) {
   if (minimal) {
     const meetings = await prisma.meeting.findMany({
       where,
-      select: { id: true, title: true, createdAt: true, status: true, scheduledAt: true },
-      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        title: true,
+        createdAt: true,
+        status: true,
+        scheduledAt: true,
+        project: { select: { id: true, name: true, color: true } },
+      },
+      orderBy: { scheduledAt: "asc" },
     });
     return NextResponse.json(meetings);
   }

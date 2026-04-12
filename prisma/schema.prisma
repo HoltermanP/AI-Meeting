@@ -18,6 +18,14 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  /// Microsoft Graph OAuth tokens (Outlook/Teams kalenderintegratie)
+  msAccessToken        String?
+  msRefreshToken       String?
+  msTokenExpiresAt     DateTime?
+  /// Graph change-notification subscription (real-time kalender-webhook)
+  msSubscriptionId     String?
+  msSubscriptionExpiry DateTime?
+
   meetings   Meeting[]
   templates  Template[]
   folders    Folder[]
@@ -51,8 +59,14 @@ model Meeting {
   scheduledAt DateTime?
   /// JSON: AgendaItem[] – agenda voor geplande vergaderingen
   agenda      String?
+  /// Outlook Graph event-id (voor bidirectionele sync)
+  outlookEventId  String?
+  /// Teams-vergader-URL (ingevuld na aanmaken Outlook-event met Teams)
+  teamsJoinUrl    String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, outlookEventId])
 
   userId     String
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)

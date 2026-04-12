@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, CalendarDays, Loader2, Wand2, ArrowLeft } from "lucide-react";
+import { Briefcase, CalendarDays, Loader2, Wand2, ArrowLeft, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,6 +39,7 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
   const [lastMeetingTitle, setLastMeetingTitle] = useState<string | null>(null);
   const [agendaStep, setAgendaStep] = useState<"generate" | "edit">("generate");
 
+  const [isTeams, setIsTeams] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -119,6 +120,7 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
         body: JSON.stringify({
           title: title.trim(),
           status: "scheduled",
+          platform: isTeams ? "teams" : undefined,
           ...(selectedProject ? { projectId: selectedProject.id } : {}),
           ...(participants.length > 0 ? { participants } : {}),
         }),
@@ -156,7 +158,7 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
           <div className="flex items-center gap-2">
             {mode !== "pick" && (
               <button
-                onClick={() => { setMode("pick"); setSelectedProject(null); setSelectedIds(new Set()); setAgendaItems([]); setAgendaStep("generate"); }}
+                onClick={() => { setMode("pick"); setSelectedProject(null); setSelectedIds(new Set()); setAgendaItems([]); setAgendaStep("generate"); setIsTeams(false); }}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -229,6 +231,30 @@ export default function PlanFromDashboardDialog({ projects, onClose, onCreated }
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-400">Datum & tijd</label>
                 <Input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className="text-sm" />
               </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-400">Platform</label>
+                <button
+                  type="button"
+                  onClick={() => setIsTeams((v) => !v)}
+                  className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
+                    isTeams
+                      ? "border-indigo-300 bg-indigo-50 text-indigo-800"
+                      : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  <Video className={`h-4 w-4 shrink-0 ${isTeams ? "text-indigo-600" : "text-gray-400"}`} />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">Teams-vergadering</p>
+                    <p className="text-xs text-gray-400">
+                      {isTeams ? "Outlook-event krijgt een Teams-deelname-link" : "Klik om Teams-vergadering in te schakelen"}
+                    </p>
+                  </div>
+                  <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${isTeams ? "border-indigo-600 bg-indigo-600" : "border-gray-300"}`}>
+                    {isTeams && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+                  </div>
+                </button>
+              </div>
+
               <div>
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-400">
                   Deelnemers

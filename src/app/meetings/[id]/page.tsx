@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Wand2, Trash2, Download, Loader2, Mic, FileText,
-  CheckSquare, MessageSquare, Edit2, Check, X, Briefcase, Calendar, Users
+  CheckSquare, MessageSquare, Edit2, Check, X, Briefcase, Calendar, Users, Video
 } from "lucide-react";
 import AgendaView, { type AgendaItem } from "@/components/meeting/AgendaView";
 import ParticipantsList from "@/components/meeting/ParticipantsList";
@@ -476,6 +476,20 @@ const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).len
                     Download
                   </Button>
                 </>
+              )}
+              {meeting.teamsJoinUrl && (
+                <Button
+                  asChild
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                >
+                  <a href={meeting.teamsJoinUrl} target="_blank" rel="noopener noreferrer">
+                    <Video className="h-4 w-4" />
+                    <span className="hidden sm:inline">Teams-meeting</span>
+                    <span className="sm:hidden">Teams</span>
+                  </a>
+                </Button>
               )}
               <Button onClick={deleteMeeting} variant="outline" size="sm" className="gap-2 text-red-600 hover:border-red-200 hover:text-red-700" title="Verwijderen">
                 <Trash2 className="h-4 w-4" />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Plus, CalendarPlus, Calendar, Play, Briefcase, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,41 @@ export default function DashboardClient({ scheduledMeetings: initial, recentMeet
   const [openNew, setOpenNew] = useState(false);
   const [openPlan, setOpenPlan] = useState(false);
   const [scheduled, setScheduled] = useState(initial);
+  const syncStarted = useRef(false);
+
+  // Stil synchroniseren met Outlook bij openen dashboard (als gekoppeld)
+  useEffect(() => {
+    // Guard tegen React StrictMode double-invocation
+    if (syncStarted.current) return;
+    syncStarted.current = true;
+
+    async function silentSync() {
+      try {
+        const statusRes = await fetch("/api/calendar/status");
+        if (!statusRes.ok) return;
+        const status = await statusRes.json() as { connected: boolean };
+        if (!status.connected) return;
+
+        // Probeer subscription te vernieuwen (best-effort, voor real-time webhook)
+        fetch("/api/calendar/subscription/renew", { method: "POST" }).catch(() => {});
+
+        const syncRes = await fetch("/api/calendar/sync", { method: "POST" });
+        if (!syncRes.ok) return;
+        const result = await syncRes.json() as { created: number };
+
+        if (result.created > 0) {
+          // Herlaad geplande meetings vanuit de API
+          const meetingsRes = await fetch("/api/meetings?status=scheduled&minimal=true");
+          if (!meetingsRes.ok) return;
+          const meetings = await meetingsRes.json() as ScheduledMeeting[];
+          if (Array.isArray(meetings)) setScheduled(meetings);
+        }
+      } catch {
+        // Stil falen: dashboard blijft gewoon werken
+      }
+    }
+    silentSync();
+  }, []);
 
   return (
     <>
