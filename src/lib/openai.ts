@@ -353,6 +353,7 @@ export async function transcribeAudio(
     const response = await openai.audio.transcriptions.create({
       file: stream as never,
       model: "whisper-1",
+      language: "nl",
       response_format: "verbose_json",
       timestamp_granularities: ["segment"],
     });

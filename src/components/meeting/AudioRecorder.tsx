@@ -34,7 +34,7 @@ export type TranscribeResultMeta = {
   provisional?: boolean;
 };
 
-/** Fysiek = alleen microfoon. Hybride/online = microfoon + systeem-audio gemengd (verschil = gebruiksscenario in de UI). */
+/** Fysiek = alleen microfoon. Hybride/online = microfoon + systeem-audio gemengd. */
 export type AudioCaptureMode = "physical" | "online" | "hybrid";
 
 type Props = {
@@ -46,10 +46,8 @@ type Props = {
 const CHUNK_AFTER_SECONDS = 30 * 60;
 const CHUNK_INTERVAL_MS = 1000;
 
-/** Schermdeling met systeemaudio: `systemAudio: "include"` vraagt expliciet om systeemgeluid (Chrome zet "Systeemaudio ook delen" vaak standaard aan). */
-function getDisplayMediaWithSystemAudio(
-  primary: boolean
-): Promise<MediaStream> {
+/** Schermdeling met systeemaudio. */
+function getDisplayMediaWithSystemAudio(primary: boolean): Promise<MediaStream> {
   const base = {
     audio: { suppressLocalAudioPlayback: false },
     systemAudio: "include" as const,
@@ -88,19 +86,12 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
-  /** Gecombineerde stream naar MediaRecorder */
   const streamRef = useRef<MediaStream | null>(null);
-  /** Display stream (online/hybrid) — video-tracks bewaken scherm-stoppen */
   const displayStreamRef = useRef<MediaStream | null>(null);
-  /** Microfoon-stream (fysiek, of gemengd met display) */
   const micStreamRef = useRef<MediaStream | null>(null);
-  /** AudioContext voor microfoon + systeem-audio mixen */
   const audioCtxRef = useRef<AudioContext | null>(null);
   const splitChunkingStartedRef = useRef(false);
   const chunkRequestIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const streamTranscriptIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const sentChunksRef = useRef(0);
-  /** Opgeslagen modus bij start (zodat stop weet welke API te gebruiken) */
   const activeModeRef = useRef<AudioCaptureMode | null>(null);
 
   const clearChunkRequestInterval = useCallback(() => {
@@ -162,18 +153,16 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
 
   const loadMics = useCallback(async () => {
     try {
-      // Vraag eerst toestemming zodat device-labels zichtbaar zijn
       const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       tempStream.getTracks().forEach((t) => t.stop());
       const devices = await navigator.mediaDevices.enumerateDevices();
       const mics = devices.filter((d) => d.kind === "audioinput");
       setAvailableMics(mics);
-      // Selecteer standaard de eerste als er nog niets geselecteerd is
       if (!selectedMicId && mics.length > 0) {
         setSelectedMicId(mics[0].deviceId);
       }
     } catch {
-      // Geen toestemming of niet beschikbaar — stil falen
+      /* geen toestemming — stil falen */
     }
   }, [selectedMicId]);
 
@@ -216,8 +205,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
         if (event.results[i].isFinal) liveSpeechFinalRef.current += `${t} `;
         else interim += t;
       }
-      const combined = liveSpeechFinalRef.current + interim;
-      onLiveTranscript?.(combined);
+      onLiveTranscript?.(liveSpeechFinalRef.current + interim);
     };
     rec.onerror = (ev: Event) => {
       const err = (ev as unknown as { error?: string }).error;
@@ -244,7 +232,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       setSpeechHint("Spraakherkenning start niet — probeer opnieuw.");
       setLiveSpeechUserStarted(false);
     }
-  }, [getSpeechCtor]);
+  }, [getSpeechCtor, onLiveTranscript]);
 
   /** Handmatig starten van live spraak (online/hybrid) na scherm-dialog. */
   const handleStartLiveSpeech = useCallback(async () => {
@@ -255,8 +243,8 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       return;
     }
     try {
-      const micConstraints: MediaTrackConstraints = selectedMicId ? { deviceId: { exact: selectedMicId } } : {};
-      const mic = await navigator.mediaDevices.getUserMedia({ audio: micConstraints });
+      const constraints: MediaTrackConstraints = selectedMicId ? { deviceId: { exact: selectedMicId } } : {};
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: constraints });
       mic.getTracks().forEach((t) => t.stop());
     } catch {
       setSpeechHint("Geen microfoontoestemming — live tekst heeft een microfoon.");
@@ -264,37 +252,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
     }
     setLiveSpeechUserStarted(true);
     startSpeechRecognition(true);
-  }, [getSpeechCtor, startSpeechRecognition]);
-
-  const startStreamTranscription = useCallback(() => {
-    if (streamTranscriptIntervalRef.current) return;
-    streamTranscriptIntervalRef.current = setInterval(async () => {
-      const rec = mediaRecorderRef.current;
-      const chunks = chunksRef.current;
-      if (rec?.state !== "recording" || chunks.length === 0) return;
-      const newChunks = chunks.slice(sentChunksRef.current);
-      if (newChunks.length === 0) return;
-      try {
-        const mimeType = rec.mimeType || "audio/webm";
-        const blob = new Blob(newChunks, { type: mimeType });
-        const formData = new FormData();
-        formData.append("audio", blob);
-        formData.append("mimeType", mimeType);
-        formData.append("isLast", "false");
-        await fetch(`/api/meetings/${meetingId}/transcribe-stream`, { method: "POST", body: formData });
-        sentChunksRef.current = chunks.length;
-      } catch {
-        /* ignore */
-      }
-    }, 8000);
-  }, [meetingId]);
-
-  const stopStreamTranscription = useCallback(() => {
-    if (streamTranscriptIntervalRef.current) {
-      clearInterval(streamTranscriptIntervalRef.current);
-      streamTranscriptIntervalRef.current = null;
-    }
-  }, []);
+  }, [getSpeechCtor, selectedMicId, startSpeechRecognition]);
 
   const stopAllStreams = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -307,6 +265,13 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
     audioCtxRef.current = null;
   }, []);
 
+  const micAudioConstraints = useCallback((): MediaTrackConstraints => ({
+    ...(selectedMicId ? { deviceId: { exact: selectedMicId } } : {}),
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  }), [selectedMicId]);
+
   const start = useCallback(async (mode: AudioCaptureMode) => {
     setError(null);
     setLiveSpeechUserStarted(false);
@@ -317,18 +282,14 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
     try {
       let recordStream: MediaStream;
 
-      const micConstraints: MediaTrackConstraints = selectedMicId
-        ? { deviceId: { exact: selectedMicId } }
-        : {};
-
       if (mode === "physical") {
-        // Alleen microfoon (fysieke meeting)
-        const micStream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints, video: false });
+        const micStream = await navigator.mediaDevices.getUserMedia({
+          audio: micAudioConstraints(),
+          video: false,
+        });
         micStreamRef.current = micStream;
         recordStream = micStream;
-
       } else {
-        // Online of hybride: microfoon + systeem-audio (scherm/tab delen met geluid) gemengd
         let displayStream: MediaStream;
         try {
           displayStream = await getDisplayMediaWithSystemAudio(true);
@@ -348,7 +309,10 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
           t.onended = () => { if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop(); };
         });
 
-        const micStream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints, video: false });
+        const micStream = await navigator.mediaDevices.getUserMedia({
+          audio: micAudioConstraints(),
+          video: false,
+        });
         micStreamRef.current = micStream;
 
         const audioCtx = new AudioContext();
@@ -367,7 +331,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       chunksRef.current = [];
       splitChunkingStartedRef.current = false;
       clearChunkRequestInterval();
-      sentChunksRef.current = 0;
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -385,15 +348,8 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
 
       startVolumeMonitor(recordStream);
 
-      // Online/hybride: stream-transcriptie starten
-      if (mode !== "physical") {
-        startStreamTranscription();
-      }
-
-      // Fysiek: spraakherkenning auto-starten
-      if (mode === "physical") {
-        startSpeechRecognition(true);
-      }
+      // Spraakherkenning auto-starten voor alle modi
+      startSpeechRecognition(true);
 
       await fetch(`/api/meetings/${meetingId}`, {
         method: "PUT",
@@ -408,41 +364,23 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
         setError(msg || "Opname starten mislukt");
       }
     }
-  }, [
-    meetingId,
-    clearChunkRequestInterval,
-    maybeStartLongRecordingChunking,
-    startStreamTranscription,
-    startSpeechRecognition,
-  ]);
+  }, [meetingId, clearChunkRequestInterval, maybeStartLongRecordingChunking, startSpeechRecognition, micAudioConstraints]);
 
   const pause = useCallback(() => {
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.pause();
       clearChunkRequestInterval();
-      stopStreamTranscription();
       stopSpeechRecognition();
       setState("paused");
       if (timerRef.current) clearInterval(timerRef.current);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     }
-  }, [clearChunkRequestInterval, stopStreamTranscription, stopSpeechRecognition]);
+  }, [clearChunkRequestInterval, stopSpeechRecognition]);
 
   const resume = useCallback(() => {
     if (mediaRecorderRef.current?.state === "paused") {
       mediaRecorderRef.current.resume();
-      // Fysiek: speech auto-hervatten
-      if (activeModeRef.current === "physical") {
-        startSpeechRecognition(false);
-      }
-      // Online/hybride: spraak alleen als gebruiker het eerder startte
-      if (activeModeRef.current !== "physical" && liveSpeechUserStarted) {
-        startSpeechRecognition(false);
-      }
-      // Online/hybride: stream-transcriptie hervatten
-      if (activeModeRef.current !== "physical") {
-        startStreamTranscription();
-      }
+      startSpeechRecognition(false);
       setState("recording");
       const pausedAt = Date.now() - duration * 1000;
       timerRef.current = setInterval(() => {
@@ -452,7 +390,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       }, 1000);
       if (streamRef.current) startVolumeMonitor(streamRef.current);
     }
-  }, [duration, startSpeechRecognition, liveSpeechUserStarted, maybeStartLongRecordingChunking, startStreamTranscription]);
+  }, [duration, startSpeechRecognition, maybeStartLongRecordingChunking]);
 
   const stop = useCallback(async () => {
     if (!mediaRecorderRef.current) return;
@@ -460,7 +398,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
     setState("processing");
     if (timerRef.current) clearInterval(timerRef.current);
     clearChunkRequestInterval();
-    stopStreamTranscription();
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
 
     await new Promise<void>((resolve) => {
@@ -473,7 +410,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
 
     const mimeType = mediaRecorderRef.current.mimeType || "audio/webm";
     const blob = new Blob(chunksRef.current, { type: mimeType });
-    const mode = activeModeRef.current;
 
     await fetch(`/api/meetings/${meetingId}`, {
       method: "PUT",
@@ -486,28 +422,14 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
     }, 500);
 
     try {
-      let transcript = "";
-
-      if (mode === "physical") {
-        // Microfoon → Whisper via /transcribe
-        const formData = new FormData();
-        formData.append("audio", blob, "recording.webm");
-        formData.append("mimeType", mimeType);
-        const res = await fetch(`/api/meetings/${meetingId}/transcribe`, { method: "POST", body: formData });
-        if (!res.ok) throw new Error("Transcriptie mislukt");
-        const data = await res.json();
-        transcript = data.transcript || "";
-      } else {
-        // Online/hybride → /transcribe-stream (laatste chunk)
-        const formData = new FormData();
-        formData.append("audio", blob, "recording.webm");
-        formData.append("mimeType", mimeType);
-        formData.append("isLast", "true");
-        const res = await fetch(`/api/meetings/${meetingId}/transcribe-stream`, { method: "POST", body: formData });
-        if (!res.ok) throw new Error("Transcriptie mislukt");
-        const data = await res.json();
-        transcript = data.transcript || "";
-      }
+      // Alle modi: volledige audio naar Whisper sturen
+      const formData = new FormData();
+      formData.append("audio", blob, "recording.webm");
+      formData.append("mimeType", mimeType);
+      const res = await fetch(`/api/meetings/${meetingId}/transcribe`, { method: "POST", body: formData });
+      if (!res.ok) throw new Error("Transcriptie mislukt");
+      const data = await res.json();
+      const transcript = data.transcript?.content || data.transcript || "";
 
       clearInterval(progressInterval);
       setProgress(100);
@@ -519,25 +441,16 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       setError(err instanceof Error ? err.message : "Transcriptie mislukt");
       setState("idle");
     }
-  }, [
-    meetingId,
-    duration,
-    onTranscribed,
-    stopAllStreams,
-    stopSpeechRecognition,
-    clearChunkRequestInterval,
-    stopStreamTranscription,
-  ]);
+  }, [meetingId, duration, onTranscribed, stopAllStreams, stopSpeechRecognition, clearChunkRequestInterval]);
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       clearChunkRequestInterval();
-      stopStreamTranscription();
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       stopAllStreams();
     };
-  }, [stopAllStreams, clearChunkRequestInterval, stopStreamTranscription]);
+  }, [stopAllStreams, clearChunkRequestInterval]);
 
   if (state === "processing") {
     return (
@@ -654,24 +567,21 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
                     label: "Fysieke meeting",
                     icon: <Mic className="h-5 w-5 shrink-0" />,
                     desc: "Alleen microfoon",
-                    detail:
-                      "Iedereen in dezelfde ruimte. Je neemt alleen op via de microfoon (geen scherm delen).",
+                    detail: "Iedereen in dezelfde ruimte. Je neemt op via de microfoon.",
                   },
                   {
                     mode: "hybrid" as const,
                     label: "Hybride meeting",
                     icon: <Users className="h-5 w-5 shrink-0" />,
                     desc: "Microfoon + systeemaudio",
-                    detail:
-                      "Deelnemers op afstand én in de ruimte: je microfoon plus het geluid van je laptop (bijv. Teams of Zoom op het scherm).",
+                    detail: "Deelnemers op afstand én in de ruimte: microfoon plus laptop-geluid (Teams/Zoom).",
                   },
                   {
                     mode: "online" as const,
                     label: "Online meeting",
                     icon: <Monitor className="h-5 w-5 shrink-0" />,
                     desc: "Jij + geluid van de call",
-                    detail:
-                      "Volledig online: je microfoon voor jezelf, plus systeemaudio voor de rest (deel het venster of tabblad met geluid).",
+                    detail: "Volledig online: microfoon voor jezelf, systeemaudio voor de rest.",
                   },
                 ] as const
               ).map(({ mode, label, icon, desc, detail }) => (
@@ -724,7 +634,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
               </Button>
             </>
           )}
-
           {state === "paused" && (
             <>
               <Button onClick={resume} variant="outline" className="gap-2">
@@ -746,23 +655,20 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
           </p>
         )}
 
-        {/* Live spraak sectie */}
+        {/* Live spraak status */}
         {(state === "recording" || state === "paused") && (
           <div className="w-full max-w-xl space-y-2">
-            <p className="text-xs font-medium text-gray-700">Live meeschrijven (browser)</p>
-
             {!speechAvailable && (
               <p className="text-[11px] text-gray-500">
-                Live ondertiteling werkt in Chrome of Edge. In andere browsers alleen Whisper na afloop.
+                Live ondertiteling werkt in Chrome of Edge. Whisper transcribeert na afloop.
               </p>
             )}
 
-            {/* Online/hybride: handmatige start-knop */}
-            {speechAvailable && activeModeRef.current !== "physical" && !liveSpeechUserStarted && (
+            {/* Online/hybride: extra knop voor handmatig starten na scherm-dialog */}
+            {speechAvailable && activeModeRef.current !== "physical" && !liveSpeechUserStarted && speechStatus === "off" && (
               <div className="rounded-lg border border-indigo-200 bg-indigo-50/80 p-3 space-y-2">
                 <p className="text-[11px] text-indigo-900 leading-relaxed">
-                  Na het delen van je scherm moet je <strong>apart</strong> live spraak starten — Chrome vereist
-                  een klik na de scherm-dialog.
+                  Live spraak kon niet automatisch starten na het scherm delen — Chrome vereist soms een extra klik.
                 </p>
                 <Button
                   type="button"
@@ -773,11 +679,8 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
                   disabled={state === "paused"}
                 >
                   <Mic className="h-4 w-4" />
-                  Start live meeschrijven (microfoon)
+                  Start live meeschrijven
                 </Button>
-                {state === "paused" && (
-                  <p className="text-[10px] text-muted-foreground">Hervat de opname om live spraak te starten.</p>
-                )}
               </div>
             )}
 
@@ -787,7 +690,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
               </p>
             )}
 
-            {(liveSpeechUserStarted || activeModeRef.current === "physical") && (
+            {speechStatus !== "off" && (
               <div className="flex items-center gap-2 text-[11px] text-gray-600">
                 <span
                   className={cn(
@@ -795,7 +698,9 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
                     speechStatus === "listening" ? "bg-green-500 animate-pulse" : "bg-gray-300"
                   )}
                 />
-                {speechStatus === "listening" ? "Luistert — transcript wordt live getoond" : speechStatus === "error" ? "Gestopt — zie melding hierboven" : "Start…"}
+                {speechStatus === "listening"
+                  ? "Luistert — live transcript wordt bijgehouden"
+                  : "Gestopt — zie melding hierboven"}
               </div>
             )}
           </div>
