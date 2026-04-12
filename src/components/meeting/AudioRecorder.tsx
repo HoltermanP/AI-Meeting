@@ -4,7 +4,6 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Mic, MicOff, Pause, Play, Square, Loader2, Monitor, Users, RefreshCw, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDuration } from "@/lib/utils";
 import type { RecordingState } from "@/types";
 import { cn } from "@/lib/utils";
@@ -41,6 +40,7 @@ export type AudioCaptureMode = "physical" | "online" | "hybrid";
 type Props = {
   meetingId: string;
   onTranscribed: (transcript: string, title: string, meta?: TranscribeResultMeta) => void;
+  onLiveTranscript?: (text: string) => void;
 };
 
 const CHUNK_AFTER_SECONDS = 30 * 60;
@@ -66,14 +66,13 @@ function getDisplayMediaWithSystemAudio(
   } as DisplayMediaStreamOptions);
 }
 
-export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
+export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscript }: Props) {
   const [captureMode, setCaptureMode] = useState<AudioCaptureMode | null>(null);
   const [state, setState] = useState<RecordingState>("idle");
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
-  const [liveSpeechText, setLiveSpeechText] = useState("");
   const [speechAvailable, setSpeechAvailable] = useState(false);
   const [liveSpeechUserStarted, setLiveSpeechUserStarted] = useState(false);
   const [speechStatus, setSpeechStatus] = useState<"off" | "listening" | "error">("off");
@@ -204,7 +203,7 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     if (!Ctor) return;
     if (resetAccumulated) {
       liveSpeechFinalRef.current = "";
-      setLiveSpeechText("");
+      onLiveTranscript?.("");
     }
     const rec = new Ctor();
     rec.lang = "nl-NL";
@@ -217,7 +216,8 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
         if (event.results[i].isFinal) liveSpeechFinalRef.current += `${t} `;
         else interim += t;
       }
-      setLiveSpeechText(liveSpeechFinalRef.current + interim);
+      const combined = liveSpeechFinalRef.current + interim;
+      onLiveTranscript?.(combined);
     };
     rec.onerror = (ev: Event) => {
       const err = (ev as unknown as { error?: string }).error;
@@ -795,18 +795,8 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
                     speechStatus === "listening" ? "bg-green-500 animate-pulse" : "bg-gray-300"
                   )}
                 />
-                {speechStatus === "listening" ? "Luistert…" : speechStatus === "error" ? "Gestopt — zie melding hierboven" : "Start…"}
+                {speechStatus === "listening" ? "Luistert — transcript wordt live getoond" : speechStatus === "error" ? "Gestopt — zie melding hierboven" : "Start…"}
               </div>
-            )}
-
-            {(liveSpeechUserStarted || (activeModeRef.current === "physical" && liveSpeechText)) && (
-              <ScrollArea className="h-36 rounded-lg border border-gray-200 bg-gray-50/80 p-3 text-sm text-gray-800">
-                {liveSpeechText ? (
-                  <p className="whitespace-pre-wrap leading-relaxed">{liveSpeechText}</p>
-                ) : (
-                  <p className="text-gray-400 text-xs">Spreek — de tekst verschijnt hier…</p>
-                )}
-              </ScrollArea>
             )}
           </div>
         )}

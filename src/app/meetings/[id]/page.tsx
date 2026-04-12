@@ -15,6 +15,7 @@ import {
   Wand2, Trash2, Download, Loader2, Mic, FileText,
   CheckSquare, MessageSquare, Edit2, Check, X, Briefcase, Calendar, Users, Video
 } from "lucide-react";
+import TranscriptView from "@/components/meeting/TranscriptView";
 import AgendaView, { type AgendaItem } from "@/components/meeting/AgendaView";
 import ParticipantsList from "@/components/meeting/ParticipantsList";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -44,6 +45,7 @@ export default function MeetingDetailPage() {
   const pdfSourceRef = useRef<HTMLDivElement>(null);
   const emptyActionItems = useMemo(() => [], []);
   const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
+  const [liveTranscript, setLiveTranscript] = useState("");
 
   useEffect(() => {
     loadMeeting();
@@ -540,6 +542,22 @@ const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).len
                 <AudioRecorder
                   meetingId={id}
                   onTranscribed={onTranscribed}
+                  onLiveTranscript={setLiveTranscript}
+                />
+              </div>
+            )}
+
+            {/* Transcript — live tijdens opname, definitief erna */}
+            {(liveTranscript || meeting.transcript) && (
+              <div>
+                <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                  <FileText className="h-4 w-4" /> Transcript
+                </h2>
+                <TranscriptView
+                  content={liveTranscript || meeting.transcript?.content || ""}
+                  segments={meeting.transcript?.segments ? JSON.parse(meeting.transcript.segments as string) : []}
+                  isLive={Boolean(liveTranscript && meeting.status !== "completed")}
+                  isProvisional={!liveTranscript && Boolean(meeting.transcript?.isProvisional)}
                 />
               </div>
             )}
