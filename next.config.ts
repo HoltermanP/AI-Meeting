@@ -1,7 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    serverActions: {
+      // Grote audio-bestanden (lange meetings) kunnen 100MB+ zijn
+      bodySizeLimit: "200mb",
+    },
+  },
 };
 
 export default nextConfig;

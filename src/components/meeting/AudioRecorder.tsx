@@ -326,7 +326,10 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       streamRef.current = recordStream;
 
       const mimeType = pickMimeType();
-      const recorder = new MediaRecorder(recordStream, { mimeType });
+      const recorder = new MediaRecorder(recordStream, {
+        mimeType,
+        audioBitsPerSecond: 32_000, // 32 kbps — genoeg voor spraak, houdt bestand klein
+      });
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
       splitChunkingStartedRef.current = false;
