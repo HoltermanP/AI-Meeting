@@ -424,21 +424,30 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       setProgress((p) => Math.min(90, p + 5));
     }, 500);
 
+    // Live-tekst opslaan vóór speech recognition stopt
+    const liveText = liveSpeechFinalRef.current.trim();
+
     try {
-      // Alle modi: volledige audio naar Whisper sturen
       const formData = new FormData();
       formData.append("audio", blob, "recording.webm");
       formData.append("mimeType", mimeType);
+      // Stuur live-tekst mee zodat de server direct iets kan opslaan als Whisper te groot/traag is
+      if (liveText) formData.append("liveTranscript", liveText);
+
       const res = await fetch(`/api/meetings/${meetingId}/transcribe`, { method: "POST", body: formData });
-      if (!res.ok) throw new Error("Transcriptie mislukt");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error((errData as { error?: string }).error || "Transcriptie mislukt");
+      }
       const data = await res.json();
       const transcript = data.transcript?.content || data.transcript || "";
+      const isProvisional = Boolean(data.provisional);
 
       clearInterval(progressInterval);
       setProgress(100);
-      setLastProvisional(false);
+      setLastProvisional(isProvisional);
       setState("done");
-      onTranscribed(transcript, "", { provisional: false });
+      onTranscribed(transcript, "", { provisional: isProvisional });
     } catch (err: unknown) {
       clearInterval(progressInterval);
       setError(err instanceof Error ? err.message : "Transcriptie mislukt");
