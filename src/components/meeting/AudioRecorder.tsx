@@ -429,10 +429,26 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
 
     try {
       const formData = new FormData();
-      formData.append("audio", blob, "recording.webm");
       formData.append("mimeType", mimeType);
-      // Stuur live-tekst mee zodat de server direct iets kan opslaan als Whisper te groot/traag is
       if (liveText) formData.append("liveTranscript", liveText);
+
+      // Probeer eerst via Vercel Blob (omzeilt de 4.5 MB Vercel body-limiet)
+      let blobUploaded = false;
+      try {
+        const { upload } = await import("@vercel/blob/client");
+        const { url } = await upload(`meeting-${meetingId}.webm`, blob, {
+          access: "public",
+          handleUploadUrl: `/api/meetings/${meetingId}/upload-audio`,
+        });
+        formData.append("blobUrl", url);
+        blobUploaded = true;
+      } catch {
+        // Blob niet geconfigureerd of mislukt → directe upload als fallback
+      }
+
+      if (!blobUploaded) {
+        formData.append("audio", blob, "recording.webm");
+      }
 
       const res = await fetch(`/api/meetings/${meetingId}/transcribe`, { method: "POST", body: formData });
       if (!res.ok) {

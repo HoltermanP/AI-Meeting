@@ -7,6 +7,7 @@ import { writeFile, unlink, readFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { spawn } from "child_process";
+import { del } from "@vercel/blob";
 
 export const maxDuration = 300;
 
@@ -92,12 +93,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const mimeType = (formData.get("mimeType") as string) || "audio/webm";
     const liveTranscript = (formData.get("liveTranscript") as string | null)?.trim() || "";
 
-    if (!audioFile) {
+    const blobUrl = (formData.get("blobUrl") as string | null)?.trim() || "";
+
+    let buffer: Buffer;
+    if (blobUrl) {
+      // Audio staat in Vercel Blob — download het hier
+      const audioRes = await fetch(blobUrl);
+      if (!audioRes.ok) throw new Error("Blob download mislukt");
+      buffer = Buffer.from(await audioRes.arrayBuffer());
+    } else if (audioFile) {
+      buffer = Buffer.from(await audioFile.arrayBuffer());
+    } else {
       await prisma.meeting.update({ where: { id }, data: { status: "draft" } });
       return NextResponse.json({ error: "Geen audio ontvangen" }, { status: 400 });
     }
-
-    const buffer = Buffer.from(await audioFile.arrayBuffer());
 
     // Fast path: live transcript beschikbaar → direct opslaan, Whisper op achtergrond
     if (liveTranscript.length >= MIN_LIVE_CHARS) {
@@ -125,8 +134,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           }
         } catch (err) {
           console.error("Background Whisper error:", err);
-          // Provisional-vlag verwijderen zodat de UI niet blijft wachten
           await prisma.transcript.updateMany({ where: { meetingId: id }, data: { isProvisional: false } });
+        } finally {
+          if (blobUrl) await del(blobUrl).catch(() => {});
         }
       });
 
@@ -148,6 +158,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     });
 
     await prisma.meeting.update({ where: { id }, data: { status: "completed", title } });
+    if (blobUrl) await del(blobUrl).catch(() => {});
 
     return NextResponse.json({ transcript, title, provisional: false });
   } catch (err) {
