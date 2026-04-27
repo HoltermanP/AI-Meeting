@@ -49,6 +49,10 @@ export type GenerateNotesTemplate = {
 export type GenerateMeetingNotesContext = {
   /** Namen (en optioneel e-mail) van ingeschreven deelnemers; de AI probeert assignee hierop te matchen. */
   participants?: Array<{ name: string; email?: string | null }>;
+  /** Extra AI-systeemcontext vanuit het overlegtype (bijv. focus dagstart, context vestiging). */
+  meetingTypeContext?: string | null;
+  /** Korte omschrijving van de focus van dit overlegtype (wordt bovenaan system prompt gezet). */
+  outputFocus?: string | null;
 };
 
 type MeetingNotesPromptBundle = {
@@ -108,6 +112,14 @@ ${template!.reportStructure}`
 
   const participantBlock = formatParticipantsForPrompt(context?.participants);
 
+  const meetingTypeBlock = context?.meetingTypeContext?.trim()
+    ? `\nOVERLEGTYPE CONTEXT (volg dit strikt):\n${context.meetingTypeContext.trim()}\n`
+    : "";
+
+  const outputFocusBlock = context?.outputFocus?.trim()
+    ? `\nFOCUS VAN DIT OVERLEG: ${context.outputFocus.trim()}\n`
+    : "";
+
   const wordBlock = hasWordFields
     ? `
 WORD-SJABLOON (verplicht)
@@ -124,7 +136,7 @@ Regels:
   const systemPrompt = `Je bent een expert in het maken van vergadernotities en actielijsten. Je zet transcripten om naar duidelijke, gestructureerde notities in het Nederlands.
 
 ${TAAL_NL}
-
+${outputFocusBlock}${meetingTypeBlock}
 VERSLAG:
 ${reportBlock}
 ${wordBlock}

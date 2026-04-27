@@ -131,8 +131,12 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       } else if (newScheduledAt && meeting.outlookEventId) {
         // Bestaand event bijwerken
         await updateOutlookEvent(session.user.id, meeting.outlookEventId, eventInput);
-      } else if (!newScheduledAt && meeting.outlookEventId && body.title !== undefined) {
-        // Alleen titel/platform/agenda gewijzigd maar meeting heeft nog wel een event
+      } else if (
+        !newScheduledAt &&
+        meeting.outlookEventId &&
+        (body.title !== undefined || body.agenda !== undefined || body.platform !== undefined)
+      ) {
+        // Titel, platform of agenda gewijzigd — push naar Outlook
         await updateOutlookEvent(session.user.id, meeting.outlookEventId, {
           ...eventInput,
           scheduledAt: meeting.scheduledAt ?? new Date(),

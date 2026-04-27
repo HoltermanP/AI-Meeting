@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getMsClientConfig } from "@/lib/app-config";
 
 export async function GET() {
   const session = await auth();
@@ -7,13 +8,12 @@ export async function GET() {
     return NextResponse.json({ error: "Niet ingelogd" }, { status: 401 });
   }
 
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const tenantId = process.env.MICROSOFT_TENANT_ID ?? "common";
+  const { tenantId, clientId } = await getMsClientConfig();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
   if (!clientId) {
     return NextResponse.json(
-      { error: "MICROSOFT_CLIENT_ID niet geconfigureerd" },
+      { error: "Microsoft Client ID niet geconfigureerd. Stel dit in via Configuratie → Microsoft 365." },
       { status: 500 }
     );
   }
@@ -23,10 +23,11 @@ export async function GET() {
     "Calendars.ReadWrite",
     "OnlineMeetings.ReadWrite",
     "User.Read",
+    "Tasks.ReadWrite",
+    "Files.ReadWrite",
     "offline_access",
   ].join(" ");
 
-  // Gebruik een willekeurige nonce als state (veiligheid), sla userId op in cookie
   const nonce = crypto.randomUUID();
 
   const params = new URLSearchParams({
@@ -42,14 +43,11 @@ export async function GET() {
   const authUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?${params.toString()}`;
 
   const res = NextResponse.redirect(authUrl);
-
-  // Sla userId op in een HttpOnly-cookie (10 min geldig)
-  // Clerk onderschept de callback zodat state niet betrouwbaar is
   res.cookies.set("ms_oauth_uid", session.user.id, {
     httpOnly: true,
     secure: appUrl.startsWith("https"),
     sameSite: "lax",
-    maxAge: 600, // 10 minuten
+    maxAge: 600,
     path: "/",
   });
 

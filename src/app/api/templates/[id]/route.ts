@@ -26,6 +26,12 @@ export async function PATCH(
       ...(body.actionItemsInstructions !== undefined && {
         actionItemsInstructions: body.actionItemsInstructions || null,
       }),
+      ...(body.goal !== undefined && { goal: body.goal || null }),
+      ...(body.defaultAgenda !== undefined && { defaultAgenda: body.defaultAgenda || null }),
+      ...(body.aiContextInstructions !== undefined && {
+        aiContextInstructions: body.aiContextInstructions || null,
+      }),
+      ...(body.outputFocus !== undefined && { outputFocus: body.outputFocus || null }),
     },
   });
   return NextResponse.json(updated);

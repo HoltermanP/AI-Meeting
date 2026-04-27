@@ -15,6 +15,7 @@ import {
   Briefcase,
   Users,
   CheckSquare,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -245,7 +246,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
       )}
 
       {/* Bottom nav */}
-      <div className="border-t border-gray-200 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div className="border-t border-gray-200 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] space-y-0.5">
         <Link
           href="/settings"
           onClick={() => onNavigate?.()}
@@ -258,6 +259,19 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
         >
           <Settings className="h-4 w-4" />
           Instellingen
+        </Link>
+        <Link
+          href="/admin/config"
+          onClick={() => onNavigate?.()}
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors md:py-2",
+            pathname === "/admin/config"
+              ? "bg-indigo-100 text-indigo-700"
+              : "text-gray-600 hover:bg-gray-100",
+          )}
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+          Configuratie
         </Link>
       </div>
     </aside>

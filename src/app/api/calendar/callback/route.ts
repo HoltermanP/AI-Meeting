@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createOrRenewSubscription } from "@/lib/microsoft-graph";
+import { getMsClientConfig } from "@/lib/app-config";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -8,7 +9,6 @@ export async function GET(req: NextRequest) {
   const error = searchParams.get("error");
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-  // userId staat in een cookie (niet in state, want Clerk overschrijft state)
   const userId = req.cookies.get("ms_oauth_uid")?.value;
 
   if (error) {
@@ -20,18 +20,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${appUrl}/settings?calendar=error&msg=${encodeURIComponent(msg)}`);
   }
 
-  // Controleer of de user bestaat
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
   if (!user) {
     return NextResponse.redirect(`${appUrl}/settings?calendar=error&msg=gebruiker_niet_gevonden`);
   }
 
-  const clientId = process.env.MICROSOFT_CLIENT_ID ?? "";
-  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET ?? "";
-  const tenantId = process.env.MICROSOFT_TENANT_ID ?? "common";
+  const { tenantId, clientId, clientSecret } = await getMsClientConfig();
   const redirectUri = `${appUrl}/api/calendar/callback`;
 
-  // Wissel de authorization code in voor tokens
   const params = new URLSearchParams({
     client_id: clientId,
     client_secret: clientSecret,
@@ -76,12 +72,10 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  // Probeer meteen een Graph-subscription aan te maken voor real-time notificaties
   await createOrRenewSubscription(userId).catch((err) => {
     console.error("Subscription aanmaken na connect mislukt:", err);
   });
 
-  // Cookie verwijderen
   const redirectRes = NextResponse.redirect(`${appUrl}/settings?calendar=connected`);
   redirectRes.cookies.set("ms_oauth_uid", "", { maxAge: 0, path: "/" });
   return redirectRes;

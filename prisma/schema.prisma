@@ -33,6 +33,12 @@ model User {
   employees  Employee[]
 }
 
+model AppConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 model Project {
   id        String   @id @default(cuid())
   name      String
@@ -40,8 +46,21 @@ model Project {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Standaard overlegtype (template) voor nieuwe meetings in dit project
+  templateId           String?
+  /// MS Planner koppeling
+  plannerPlanId        String?
+  plannerBucketId      String?
+  /// SharePoint documentopslag
+  sharePointSiteId     String?
+  sharePointDriveId    String?
+  sharePointFolderPath String?
+  /// Teams Incoming Webhook URL voor notificaties
+  teamsWebhookUrl      String?
+
   userId        String
   user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template      Template?             @relation("ProjectTemplate", fields: [templateId], references: [id], onDelete: SetNull)
   meetings      Meeting[]
   actionItems   ActionItem[]
   participants  ProjectParticipant[]
@@ -124,6 +143,8 @@ model ActionItem {
   assignee    String?
   dueDate     DateTime?
   completed   Boolean   @default(false)
+  /// MS Planner task ID voor bidirectionele sync
+  plannerTaskId String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -199,12 +220,18 @@ model Template {
   docxPlaceholderKeys     String?
   isDefault               Boolean  @default(false)
   isPublic    Boolean  @default(false)
+  /// Overlegtype-velden — doel, standaard agenda en AI-context
+  goal                  String?
+  defaultAgenda         String?
+  aiContextInstructions String?
+  outputFocus           String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  userId   String
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  meetings Meeting[]
+  userId             String
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meetings           Meeting[]
+  defaultForProjects Project[] @relation("ProjectTemplate")
 }
 
 model Folder {

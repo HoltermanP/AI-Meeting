@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { generateMeetingNotes } from "@/lib/openai";
 import { findActionItemsForMeeting } from "@/lib/meeting-action-items";
 import { userMessageForLlmFailure } from "@/lib/llm";
+import { createPlannerTask } from "@/lib/planner";
+import { uploadToSharePoint } from "@/lib/sharepoint";
 
 const encoder = new TextEncoder();
 
@@ -20,8 +22,27 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const meeting = await prisma.meeting.findFirst({
       where: { id, userId: session.user.id },
-      include: { transcript: true, notes: true, template: true, participants: true },
+      include: {
+        transcript: true,
+        notes: true,
+        template: true,
+        participants: true,
+        project: {
+          select: {
+            id: true,
+            plannerPlanId: true,
+            plannerBucketId: true,
+            sharePointDriveId: true,
+            sharePointFolderPath: true,
+            teamsWebhookUrl: true,
+            template: {
+              select: { aiContextInstructions: true, outputFocus: true },
+            },
+          },
+        },
+      },
     });
+
     if (!meeting) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (!meeting.transcript)
       return NextResponse.json({ error: "No transcript available" }, { status: 400 });
@@ -42,6 +63,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       email: p.email,
     }));
 
+    // Meeting type context: eigen template voor de meeting eerst, daarna project-template
+    const meetingTypeContext =
+      meeting.template?.aiContextInstructions ??
+      meeting.project?.template?.aiContextInstructions ??
+      null;
+
+    const outputFocus =
+      meeting.template?.outputFocus ??
+      meeting.project?.template?.outputFocus ??
+      null;
+
     const transcriptContent = meeting.transcript.content;
 
     const stream = new ReadableStream({
@@ -52,7 +84,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             transcriptContent,
             templatePayload,
             rawNotes,
-            { participants },
+            { participants, meetingTypeContext, outputFocus },
             {
               onStreamDelta: (text) => {
                 send(sse({ type: "delta", text }));
@@ -62,30 +94,67 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
           await prisma.notes.upsert({
             where: { meetingId: id },
-            update: {
-              content: notes,
-              summary,
-              rawNotes,
-            },
-            create: {
-              meetingId: id,
-              content: notes,
-              summary,
-              rawNotes,
-            },
+            update: { content: notes, summary, rawNotes },
+            create: { meetingId: id, content: notes, summary, rawNotes },
           });
 
           await prisma.actionItem.deleteMany({ where: { meetingId: id } });
+
           if (aiActionItems.length > 0) {
-            await prisma.actionItem.createMany({
-              data: aiActionItems.map((item) => ({
-                meetingId: id,
-                projectId: meeting.projectId ?? undefined,
-                title: item.title,
-                assignee: item.assignee,
-                description: item.description,
-              })),
-            });
+            const created = await prisma.$transaction(
+              aiActionItems.map((item) =>
+                prisma.actionItem.create({
+                  data: {
+                    meetingId: id,
+                    projectId: meeting.projectId ?? undefined,
+                    title: item.title,
+                    assignee: item.assignee,
+                    description: item.description,
+                  },
+                })
+              )
+            );
+
+            // Planner-taken aanmaken als project gekoppeld is
+            const project = meeting.project;
+            if (project?.plannerPlanId && project.plannerBucketId) {
+              await Promise.all(
+                created.map(async (dbItem, i) => {
+                  const taskId = await createPlannerTask(
+                    session.user.id,
+                    project.plannerPlanId!,
+                    project.plannerBucketId!,
+                    {
+                      title: dbItem.title,
+                      description: dbItem.description,
+                      dueDate: dbItem.dueDate,
+                    }
+                  );
+                  if (taskId) {
+                    await prisma.actionItem.update({
+                      where: { id: dbItem.id },
+                      data: { plannerTaskId: taskId },
+                    });
+                  }
+                })
+              );
+            }
+          }
+
+          // SharePoint-upload als project geconfigureerd is
+          const project = meeting.project;
+          if (project?.sharePointDriveId && notes) {
+            const folder = project.sharePointFolderPath || "Notulen";
+            const dateStr = new Date().toISOString().slice(0, 10);
+            const fileName = `${meeting.title.replace(/[/\\:*?"<>|]/g, "_")}_${dateStr}.txt`;
+            await uploadToSharePoint(
+              session.user.id,
+              project.sharePointDriveId,
+              folder,
+              fileName,
+              Buffer.from(notes, "utf-8"),
+              "text/plain"
+            ).catch((e) => console.error("[generate-notes] SharePoint upload fout:", e));
           }
 
           const updatedMeeting = await prisma.meeting.findUnique({

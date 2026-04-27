@@ -7,9 +7,14 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import { getMsClientConfig } from "@/lib/app-config";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-const TOKEN_URL = `https://login.microsoftonline.com/${process.env.MICROSOFT_TENANT_ID ?? "common"}/oauth2/v2.0/token`;
+
+async function getTokenUrl(): Promise<string> {
+  const { tenantId } = await getMsClientConfig();
+  return `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -55,15 +60,18 @@ async function getMsTokens(userId: string): Promise<MsTokens | null> {
 }
 
 async function refreshTokens(userId: string, refreshToken: string): Promise<string> {
+  const { clientId, clientSecret } = await getMsClientConfig();
+  const tokenUrl = await getTokenUrl();
+
   const params = new URLSearchParams({
-    client_id: process.env.MICROSOFT_CLIENT_ID ?? "",
-    client_secret: process.env.MICROSOFT_CLIENT_SECRET ?? "",
+    client_id: clientId,
+    client_secret: clientSecret,
     refresh_token: refreshToken,
     grant_type: "refresh_token",
-    scope: "Calendars.ReadWrite OnlineMeetings.ReadWrite User.Read offline_access",
+    scope: "Calendars.ReadWrite OnlineMeetings.ReadWrite User.Read Tasks.ReadWrite Files.ReadWrite offline_access",
   });
 
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetch(tokenUrl, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString(),

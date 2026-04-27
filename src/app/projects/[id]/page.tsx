@@ -7,7 +7,7 @@ import ProjectActionItemsList from "@/components/meeting/ProjectActionItemsList"
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Briefcase, ArrowLeft, Users, Plus, Trash2, Loader2, CalendarPlus, Calendar, Play, CheckSquare, Mic
+  Briefcase, ArrowLeft, Users, Plus, Trash2, Loader2, CalendarPlus, Calendar, Play, CheckSquare, Mic, Link2
 } from "lucide-react";
 import Link from "next/link";
 import PlanMeetingDialog from "@/components/project/PlanMeetingDialog";
@@ -16,6 +16,11 @@ type Project = {
   id: string;
   name: string;
   color: string;
+  plannerPlanId: string | null;
+  plannerBucketId: string | null;
+  sharePointDriveId: string | null;
+  sharePointFolderPath: string | null;
+  teamsWebhookUrl: string | null;
 };
 
 type ActionItem = {
@@ -252,7 +257,8 @@ export default function ProjectDetailPage() {
 
         {/* Stats als navigatietegels */}
         <Tabs defaultValue="actions" className="space-y-6" onValueChange={(v) => { if (v === "team") loadEmployees(); }}>
-          <TabsList className="mb-0 grid h-auto w-full grid-cols-3 gap-3 bg-transparent p-0">
+
+          <TabsList className="mb-0 grid h-auto w-full grid-cols-4 gap-3 bg-transparent p-0">
             <TabsTrigger
               value="actions"
               className="flex h-auto flex-col items-start rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all data-[state=active]:border-indigo-300 data-[state=active]:bg-indigo-50 data-[state=active]:shadow-none"
@@ -285,6 +291,18 @@ export default function ProjectDetailPage() {
               </div>
               <span className="mt-3 text-xs font-medium text-gray-500">Meetings</span>
               <span className="mt-0.5 text-2xl font-bold text-gray-900">{meetings.length}</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="integrations"
+              className="flex h-auto flex-col items-start rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all data-[state=active]:border-indigo-300 data-[state=active]:bg-indigo-50 data-[state=active]:shadow-none"
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-100">
+                <Link2 className="h-4 w-4 text-purple-600" />
+              </div>
+              <span className="mt-3 text-xs font-medium text-gray-500">Integraties</span>
+              <span className="mt-0.5 text-sm font-semibold text-gray-700">
+                {[project.plannerPlanId, project.sharePointDriveId, project.teamsWebhookUrl].filter(Boolean).length}/3
+              </span>
             </TabsTrigger>
           </TabsList>
 
@@ -415,6 +433,39 @@ export default function ProjectDetailPage() {
                   ))}
                 </div>
               )}
+            </div>
+          </TabsContent>
+          {/* Integraties Tab */}
+          <TabsContent value="integrations" className="space-y-4">
+            <div className="rounded-lg border border-gray-200 bg-white p-6 space-y-3">
+              <h2 className="text-lg font-semibold">Microsoft 365 koppelingen</h2>
+              <p className="text-sm text-gray-600">
+                Beheer integraties via{" "}
+                <a href="/admin/config" className="text-indigo-600 underline">
+                  Configuratie → Koppelingen per project
+                </a>.
+              </p>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${project.plannerPlanId ? "bg-green-500" : "bg-gray-300"}`} />
+                  <span className="text-gray-700">Planner</span>
+                  {project.plannerPlanId && <span className="text-xs text-gray-400">gekoppeld</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${project.sharePointDriveId ? "bg-green-500" : "bg-gray-300"}`} />
+                  <span className="text-gray-700">SharePoint</span>
+                  {project.sharePointDriveId && (
+                    <span className="text-xs text-gray-400">
+                      {project.sharePointFolderPath || "Notulen"}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${project.teamsWebhookUrl ? "bg-green-500" : "bg-gray-300"}`} />
+                  <span className="text-gray-700">Teams notificaties</span>
+                  {project.teamsWebhookUrl && <span className="text-xs text-gray-400">webhook actief</span>}
+                </div>
+              </div>
             </div>
           </TabsContent>
         </Tabs>

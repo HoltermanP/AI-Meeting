@@ -10,6 +10,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const project = await prisma.project.findFirst({
     where: { id, userId: session.user.id },
+    include: { template: { select: { id: true, name: true } } },
   });
 
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -35,7 +36,14 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     data: {
       ...(typeof body.name === "string" && { name: body.name.trim() }),
       ...(typeof body.color === "string" && { color: body.color }),
+      ...(body.templateId !== undefined && { templateId: body.templateId || null }),
+      ...(body.plannerPlanId !== undefined && { plannerPlanId: body.plannerPlanId || null }),
+      ...(body.plannerBucketId !== undefined && { plannerBucketId: body.plannerBucketId || null }),
+      ...(body.sharePointDriveId !== undefined && { sharePointDriveId: body.sharePointDriveId || null }),
+      ...(body.sharePointFolderPath !== undefined && { sharePointFolderPath: body.sharePointFolderPath || null }),
+      ...(body.teamsWebhookUrl !== undefined && { teamsWebhookUrl: body.teamsWebhookUrl || null }),
     },
+    include: { template: { select: { id: true, name: true } } },
   });
 
   return NextResponse.json(updated);
@@ -53,9 +61,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  await prisma.project.delete({
-    where: { id },
-  });
+  await prisma.project.delete({ where: { id } });
 
   return NextResponse.json({ success: true });
 }

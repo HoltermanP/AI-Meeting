@@ -79,6 +79,10 @@ export async function POST(req: Request) {
     description?: string | null;
     content?: string;
     actionItemsInstructions?: string | null;
+    goal?: string | null;
+    defaultAgenda?: string | null;
+    aiContextInstructions?: string | null;
+    outputFocus?: string | null;
   };
   try {
     body = await req.json();
@@ -100,6 +104,10 @@ export async function POST(req: Request) {
         description: body.description ?? null,
         content: body.content,
         actionItemsInstructions: body.actionItemsInstructions || null,
+        goal: body.goal || null,
+        defaultAgenda: body.defaultAgenda || null,
+        aiContextInstructions: body.aiContextInstructions || null,
+        outputFocus: body.outputFocus || null,
         userId: session.user.id,
       },
     });

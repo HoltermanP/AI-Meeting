@@ -36,6 +36,10 @@ type Template = {
   description: string | null;
   content: string;
   actionItemsInstructions: string | null;
+  goal: string | null;
+  defaultAgenda: string | null;
+  aiContextInstructions: string | null;
+  outputFocus: string | null;
   userId: string;
 };
 
@@ -63,6 +67,10 @@ export default function SettingsPage() {
   const [formDescription, setFormDescription] = useState("");
   const [formContent, setFormContent] = useState("");
   const [formActionInstructions, setFormActionInstructions] = useState("");
+  const [formGoal, setFormGoal] = useState("");
+  const [formDefaultAgenda, setFormDefaultAgenda] = useState("");
+  const [formAiContext, setFormAiContext] = useState("");
+  const [formOutputFocus, setFormOutputFocus] = useState("");
   const [formSaving, setFormSaving] = useState(false);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
 
@@ -175,10 +183,10 @@ export default function SettingsPage() {
 (korte weergave)
 
 ## Belangrijkste punten
-- 
+-
 
 ## Beslissingen
-- 
+-
 
 ## Actiepunten
 - [ ]
@@ -188,6 +196,10 @@ export default function SettingsPage() {
     setFormActionInstructions(
       "Per actiepunt: title, assignee (wie doet het), description (wat/wanneer)."
     );
+    setFormGoal("");
+    setFormDefaultAgenda("");
+    setFormAiContext("");
+    setFormOutputFocus("");
     setDialogOpen(true);
   }
 
@@ -198,6 +210,10 @@ export default function SettingsPage() {
     setFormDescription(t.description || "");
     setFormContent(t.content);
     setFormActionInstructions(t.actionItemsInstructions || "");
+    setFormGoal(t.goal || "");
+    setFormDefaultAgenda(t.defaultAgenda || "");
+    setFormAiContext(t.aiContextInstructions || "");
+    setFormOutputFocus(t.outputFocus || "");
     setDialogOpen(true);
   }
 
@@ -218,6 +234,10 @@ export default function SettingsPage() {
             description: formDescription || null,
             content: formContent.trim() || contentToSave,
             actionItemsInstructions: formActionInstructions.trim() || null,
+            goal: formGoal.trim() || null,
+            defaultAgenda: formDefaultAgenda.trim() || null,
+            aiContextInstructions: formAiContext.trim() || null,
+            outputFocus: formOutputFocus.trim() || null,
           }),
         });
       } else {
@@ -229,6 +249,10 @@ export default function SettingsPage() {
             description: formDescription || null,
             content: contentToSave,
             actionItemsInstructions: formActionInstructions.trim() || null,
+            goal: formGoal.trim() || null,
+            defaultAgenda: formDefaultAgenda.trim() || null,
+            aiContextInstructions: formAiContext.trim() || null,
+            outputFocus: formOutputFocus.trim() || null,
           }),
         });
         const raw = await res.text();
@@ -618,6 +642,59 @@ export default function SettingsPage() {
                 placeholder="Bv. Per item: title, assignee, dueDate (tekst), priority (hoog/medium/laag)."
                 className="min-h-[80px] text-sm"
               />
+            </div>
+
+            <div className="border-t pt-4 space-y-4">
+              <p className="text-sm font-semibold text-gray-700">Overlegtype-instellingen (optioneel)</p>
+              <p className="text-xs text-muted-foreground -mt-2">
+                Gebruik dit als dit template een vast overlegtype is (bijv. Dagstart, Weekreview). De AI past automatisch de juiste focus toe.
+              </p>
+
+              <div className="space-y-1.5">
+                <Label>Doel van dit overleg</Label>
+                <Textarea
+                  value={formGoal}
+                  onChange={(e) => setFormGoal(e.target.value)}
+                  placeholder="Bijv. Kort cyclisch overleg gericht op dagelijkse operationele sturing, met focus op bezetting, commerciële kansen en knelpunten."
+                  className="min-h-[80px] text-sm"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>AI-context voor dit overlegtype</Label>
+                <p className="text-xs text-muted-foreground">
+                  Extra instructies die de AI krijgt als systeemcontext. Beschrijf de focus, wat wel/niet vastgelegd moet worden, en de toon van de output.
+                </p>
+                <Textarea
+                  value={formAiContext}
+                  onChange={(e) => setFormAiContext(e.target.value)}
+                  placeholder="Bijv. Focus op snelheid en directe toepasbaarheid. Noteer ALLEEN afwijkingen ten opzichte van de standaardsituatie. Neem openstaande acties uit vorige dagstart mee..."
+                  className="min-h-[100px] text-sm"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Output-focus (korte omschrijving)</Label>
+                <input
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                  value={formOutputFocus}
+                  onChange={(e) => setFormOutputFocus(e.target.value)}
+                  placeholder="Bijv. Dagstart vestiging — operationele sturing"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Standaard agenda-structuur</Label>
+                <p className="text-xs text-muted-foreground">
+                  Agendapunten die altijd terugkomen (één per regel). Worden gebruikt als basis bij automatisch aanmaken van een agenda.
+                </p>
+                <Textarea
+                  value={formDefaultAgenda}
+                  onChange={(e) => setFormDefaultAgenda(e.target.value)}
+                  placeholder={`Opening / aanwezigheid (2 min)\nReview acties vorige dagstart (5 min)\nBezetting vandaag (5 min)\nCommerciële kansen (3 min)\nKnelpunten & acties (5 min)\nAfsluiting (1 min)`}
+                  className="min-h-[120px] text-sm font-mono"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
