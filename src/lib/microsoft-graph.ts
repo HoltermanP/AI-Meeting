@@ -54,6 +54,14 @@ async function getMsTokens(userId: string): Promise<MsTokens | null> {
   };
 }
 
+/** Thrown when Azure revokes consent or the refresh token is no longer valid. */
+export class MsAuthRequiredError extends Error {
+  constructor() {
+    super("Microsoft-account opnieuw koppelen vereist");
+    this.name = "MsAuthRequiredError";
+  }
+}
+
 async function refreshTokens(userId: string, refreshToken: string): Promise<string> {
   // .env is the guaranteed baseline; DB config overrides only when non-empty
   let clientId = process.env.MICROSOFT_CLIENT_ID ?? "";
@@ -82,8 +90,23 @@ async function refreshTokens(userId: string, refreshToken: string): Promise<stri
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`MS token refresh mislukt: ${err}`);
+    const errText = await res.text();
+    let errJson: { error?: string; suberror?: string } = {};
+    try { errJson = JSON.parse(errText); } catch { /* not JSON */ }
+
+    // Consent revoked or new scopes added since last auth — clear stale tokens
+    if (
+      errJson.error === "invalid_grant" ||
+      errJson.suberror === "consent_required"
+    ) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { msAccessToken: null, msRefreshToken: null, msTokenExpiresAt: null },
+      });
+      throw new MsAuthRequiredError();
+    }
+
+    throw new Error(`MS token refresh mislukt: ${errText}`);
   }
 
   const data = (await res.json()) as {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { listUpcomingOutlookEvents, type OutlookEvent } from "@/lib/microsoft-graph";
+import { listUpcomingOutlookEvents, MsAuthRequiredError, type OutlookEvent } from "@/lib/microsoft-graph";
 
 export async function POST() {
   const session = await auth();
@@ -15,6 +15,9 @@ export async function POST() {
   try {
     events = await listUpcomingOutlookEvents(userId);
   } catch (err) {
+    if (err instanceof MsAuthRequiredError) {
+      return NextResponse.json({ error: err.message, code: "ms_auth_required" }, { status: 401 });
+    }
     const msg = err instanceof Error ? err.message : "Onbekende fout";
     return NextResponse.json({ error: msg }, { status: 500 });
   }

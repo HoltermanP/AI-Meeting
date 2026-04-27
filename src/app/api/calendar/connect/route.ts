@@ -37,7 +37,7 @@ export async function GET() {
     scope: scopes,
     state: nonce,
     response_mode: "query",
-    prompt: "select_account",
+    prompt: "consent",
   });
 
   const authUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?${params.toString()}`;

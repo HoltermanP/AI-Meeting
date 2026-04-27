@@ -6,6 +6,7 @@ import { findActionItemsForMeeting } from "@/lib/meeting-action-items";
 import { userMessageForLlmFailure } from "@/lib/llm";
 import { createPlannerTask } from "@/lib/planner";
 import { uploadToSharePoint } from "@/lib/sharepoint";
+import { notesToHtml, buildNotesOnlyExportHtml } from "@/lib/notes-format";
 
 const encoder = new TextEncoder();
 
@@ -146,14 +147,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           if (project?.sharePointDriveId && notes) {
             const folder = project.sharePointFolderPath || "Notulen";
             const dateStr = new Date().toISOString().slice(0, 10);
-            const fileName = `${meeting.title.replace(/[/\\:*?"<>|]/g, "_")}_${dateStr}.txt`;
+            const safeName = meeting.title.replace(/[/\\:*?"<>|]/g, "_");
+            const fileName = `${safeName}_${dateStr}.docx`;
+            const HTMLtoDOCX = (await import("html-to-docx")).default;
+            const docxBuffer = await HTMLtoDOCX(
+              buildNotesOnlyExportHtml(notesToHtml(notes)),
+              "<p></p>",
+              { title: meeting.title, creator: "AI Meetings", font: "Calibri", fontSize: 22 }
+            );
             await uploadToSharePoint(
               session.user.id,
               project.sharePointDriveId,
               folder,
               fileName,
-              Buffer.from(notes, "utf-8"),
-              "text/plain"
+              Buffer.from(docxBuffer as Buffer),
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             ).catch((e) => console.error("[generate-notes] SharePoint upload fout:", e));
           }
 
