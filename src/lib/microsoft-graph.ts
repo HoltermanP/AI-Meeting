@@ -11,11 +11,6 @@ import { getMsClientConfig } from "@/lib/app-config";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
-async function getTokenUrl(): Promise<string> {
-  const { tenantId } = await getMsClientConfig();
-  return `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-}
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -60,8 +55,17 @@ async function getMsTokens(userId: string): Promise<MsTokens | null> {
 }
 
 async function refreshTokens(userId: string, refreshToken: string): Promise<string> {
-  const { clientId, clientSecret } = await getMsClientConfig();
-  const tokenUrl = await getTokenUrl();
+  // .env is the guaranteed baseline; DB config overrides only when non-empty
+  let clientId = process.env.MICROSOFT_CLIENT_ID ?? "";
+  let clientSecret = process.env.MICROSOFT_CLIENT_SECRET ?? "";
+  let tenantId = process.env.MICROSOFT_TENANT_ID ?? "common";
+  try {
+    const db = await getMsClientConfig();
+    if (db.clientId) clientId = db.clientId;
+    if (db.clientSecret) clientSecret = db.clientSecret;
+    if (db.tenantId && db.tenantId !== "common") tenantId = db.tenantId;
+  } catch { /* fall back to env vars */ }
+  const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
 
   const params = new URLSearchParams({
     client_id: clientId,
