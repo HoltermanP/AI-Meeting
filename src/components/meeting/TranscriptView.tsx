@@ -18,6 +18,8 @@ export default function TranscriptView({ content, segments = [], isProvisional }
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
 
+  const isFailed = content.startsWith("⚠️ Transcriptie mislukt");
+
   const filtered = search
     ? segments.filter((s) =>
         s.text.toLowerCase().includes(search.toLowerCase())
@@ -54,9 +56,14 @@ export default function TranscriptView({ content, segments = [], isProvisional }
           <span className="text-xs text-gray-400 font-normal">
             ({segments.length} segments)
           </span>
-          {isProvisional && (
+          {isProvisional && !isFailed && (
             <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-900">
               Voorlopig
+            </span>
+          )}
+          {isFailed && (
+            <span className="ml-2 rounded bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-700">
+              Mislukt
             </span>
           )}
         </button>
@@ -73,14 +80,19 @@ export default function TranscriptView({ content, segments = [], isProvisional }
         )}
       </div>
 
-      {isProvisional && !collapsed && (
+      {isProvisional && !isFailed && !collapsed && (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          Dit is voorlopige tekst (live herkenning). Whisper vervangt dit door een definitieve transcriptie met
-          tijdstippen zodra de verwerking klaar is.
+          Whisper verwerkt de opname op de achtergrond. De pagina ververst automatisch zodra het transcript klaar is.
         </p>
       )}
 
-      {!collapsed && (
+      {isFailed && !collapsed && (
+        <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 whitespace-pre-wrap">
+          {content}
+        </p>
+      )}
+
+      {!collapsed && !isFailed && (
         <ScrollArea className="h-96 rounded-xl border border-gray-200 bg-gray-50">
           <div className="p-4 space-y-3">
             {segments.length > 0 ? (
@@ -94,8 +106,10 @@ export default function TranscriptView({ content, segments = [], isProvisional }
                   </p>
                 </div>
               ))
-            ) : (
+            ) : content ? (
               <p className="text-sm text-gray-500 whitespace-pre-wrap">{content}</p>
+            ) : (
+              <p className="text-sm text-gray-400 italic">Transcript wordt verwerkt…</p>
             )}
             {filtered.length === 0 && search && (
               <p className="text-sm text-gray-400 text-center py-8">

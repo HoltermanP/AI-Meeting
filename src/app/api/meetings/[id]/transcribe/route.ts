@@ -87,20 +87,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const mimeType = (formData.get("mimeType") as string) || "audio/webm";
     const blobUrl = (formData.get("blobUrl") as string | null)?.trim() || "";
 
-    let buffer: Buffer;
-    if (blobUrl) {
-      // Audio staat in Vercel Blob — download het hier
-      const audioRes = await fetch(blobUrl);
-      if (!audioRes.ok) throw new Error("Blob download mislukt");
-      buffer = Buffer.from(await audioRes.arrayBuffer());
-    } else if (audioFile) {
-      buffer = Buffer.from(await audioFile.arrayBuffer());
-    } else {
-      await prisma.meeting.update({ where: { id }, data: { status: "draft" } });
-      return NextResponse.json({ error: "Geen audio ontvangen" }, { status: 400 });
+    // Voor directe upload (kleine bestanden, max ~4 MB via Vercel): buffer hier inlezen.
+    // Voor Blob-uploads: URL doorgeven aan after() zodat de download daar plaatsvindt
+    // en de server meteen kan antwoorden.
+    let directBuffer: Buffer | null = null;
+    if (!blobUrl) {
+      if (!audioFile) {
+        await prisma.meeting.update({ where: { id }, data: { status: "draft" } });
+        return NextResponse.json({ error: "Geen audio ontvangen" }, { status: 400 });
+      }
+      directBuffer = Buffer.from(await audioFile.arrayBuffer());
     }
 
-    // Sla provisorisch op zodat de UI direct verder kan; Whisper draait op de achtergrond
+    // Provisorisch opslaan zodat de UI direct verder kan; Whisper draait op de achtergrond
     const transcriptRow = await prisma.transcript.upsert({
       where: { meetingId: id },
       update: { content: "", segments: JSON.stringify([]), isProvisional: true },
@@ -109,10 +108,27 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     await prisma.meeting.update({ where: { id }, data: { status: "completed" } });
 
+    // Sluit variabelen in zodat after() ze kan gebruiken
+    const capturedBlobUrl = blobUrl;
+    const capturedBuffer = directBuffer;
+    const capturedMimeType = mimeType;
+
     // Whisper verwerkt de volledige opname op de achtergrond — werkt ook voor 1+ uur meetings
     after(async () => {
+      let buffer: Buffer;
       try {
-        const { text, segments } = await transcribeBestEffort(buffer, mimeType);
+        if (capturedBlobUrl) {
+          // Grote bestanden: download hier (buiten de response-latency)
+          const audioRes = await fetch(capturedBlobUrl);
+          if (!audioRes.ok) throw new Error(`Blob download mislukt (${audioRes.status})`);
+          buffer = Buffer.from(await audioRes.arrayBuffer());
+        } else if (capturedBuffer) {
+          buffer = capturedBuffer;
+        } else {
+          throw new Error("Geen audiodata beschikbaar");
+        }
+
+        const { text, segments } = await transcribeBestEffort(buffer, capturedMimeType);
         await prisma.transcript.update({
           where: { meetingId: id },
           data: { content: text, segments: JSON.stringify(segments), isProvisional: false },
@@ -122,10 +138,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           await prisma.meeting.update({ where: { id }, data: { title: await generateTitle(text) } });
         }
       } catch (err) {
-        console.error("Background Whisper error:", err);
-        await prisma.transcript.updateMany({ where: { meetingId: id }, data: { isProvisional: false } });
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("Background Whisper error:", msg);
+        // Foutmelding opslaan in het transcript zodat de gebruiker het ziet via polling
+        await prisma.transcript.updateMany({
+          where: { meetingId: id },
+          data: {
+            content: `⚠️ Transcriptie mislukt: ${msg}`,
+            isProvisional: false,
+          },
+        });
       } finally {
-        if (blobUrl) await del(blobUrl).catch(() => {});
+        if (capturedBlobUrl) await del(capturedBlobUrl).catch(() => {});
       }
     });
 
