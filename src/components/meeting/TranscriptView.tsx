@@ -10,13 +10,11 @@ import type { TranscriptSegment } from "@/types";
 type Props = {
   content: string;
   segments?: TranscriptSegment[];
-  /** Live browser-tekst; Whisper vervangt straks met tijdstippen. */
+  /** Whisper is nog bezig — transcript wordt straks bijgewerkt. */
   isProvisional?: boolean;
-  /** Momenteel live, direct van spraakherkenning */
-  isLive?: boolean;
 };
 
-export default function TranscriptView({ content, segments = [], isProvisional, isLive }: Props) {
+export default function TranscriptView({ content, segments = [], isProvisional }: Props) {
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
 
@@ -56,12 +54,7 @@ export default function TranscriptView({ content, segments = [], isProvisional, 
           <span className="text-xs text-gray-400 font-normal">
             ({segments.length} segments)
           </span>
-          {isLive && (
-            <span className="ml-2 rounded bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-green-900 animate-pulse">
-              🔴 Live
-            </span>
-          )}
-          {isProvisional && !isLive && (
+          {isProvisional && (
             <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-900">
               Voorlopig
             </span>
@@ -80,13 +73,7 @@ export default function TranscriptView({ content, segments = [], isProvisional, 
         )}
       </div>
 
-      {isLive && !collapsed && (
-        <p className="text-xs text-green-800 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-          Dit is live herkenning direct van je microfoon terwijl je spreekt. De volledige opname wordt na het stoppen nog verwerkt door Whisper voor nauwkeurigheid.
-        </p>
-      )}
-
-      {isProvisional && !isLive && !collapsed && (
+      {isProvisional && !collapsed && (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
           Dit is voorlopige tekst (live herkenning). Whisper vervangt dit door een definitieve transcriptie met
           tijdstippen zodra de verwerking klaar is.

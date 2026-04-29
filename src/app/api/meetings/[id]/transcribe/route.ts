@@ -13,12 +13,6 @@ export const maxDuration = 300;
 
 /** Whisper max: 25 MB. We houden 1 MB marge. */
 const WHISPER_MAX_BYTES = 24 * 1024 * 1024;
-const MIN_LIVE_CHARS = 40;
-
-function quickTitleFromLive(live: string, current: string): string {
-  if (current !== "Naamloze meeting" && current !== "Untitled Meeting") return current;
-  return live.trim().replace(/\s+/g, " ").slice(0, 72) || current;
-}
 
 /**
  * Comprimeert audio naar 16 kHz mono MP3 via ffmpeg.
@@ -91,8 +85,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const formData = await req.formData();
     const audioFile = formData.get("audio") as Blob;
     const mimeType = (formData.get("mimeType") as string) || "audio/webm";
-    const liveTranscript = (formData.get("liveTranscript") as string | null)?.trim() || "";
-
     const blobUrl = (formData.get("blobUrl") as string | null)?.trim() || "";
 
     let buffer: Buffer;
@@ -108,59 +100,36 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: "Geen audio ontvangen" }, { status: 400 });
     }
 
-    // Fast path: live transcript beschikbaar → direct opslaan, Whisper op achtergrond
-    if (liveTranscript.length >= MIN_LIVE_CHARS) {
-      const titleNow = quickTitleFromLive(liveTranscript, meeting.title);
-
-      const transcriptRow = await prisma.transcript.upsert({
-        where: { meetingId: id },
-        update: { content: liveTranscript, segments: JSON.stringify([]), isProvisional: true },
-        create: { meetingId: id, content: liveTranscript, segments: JSON.stringify([]), isProvisional: true },
-      });
-
-      await prisma.meeting.update({ where: { id }, data: { status: "completed", title: titleNow } });
-
-      // Whisper verwerkt op de achtergrond en vervangt de provisonele tekst
-      after(async () => {
-        try {
-          const { text, segments } = await transcribeBestEffort(buffer, mimeType);
-          await prisma.transcript.update({
-            where: { meetingId: id },
-            data: { content: text, segments: JSON.stringify(segments), isProvisional: false },
-          });
-          const m = await prisma.meeting.findUnique({ where: { id } });
-          if (m && text && (m.title === "Naamloze meeting" || m.title === "Untitled Meeting" || m.title === titleNow)) {
-            await prisma.meeting.update({ where: { id }, data: { title: await generateTitle(text) } });
-          }
-        } catch (err) {
-          console.error("Background Whisper error:", err);
-          await prisma.transcript.updateMany({ where: { meetingId: id }, data: { isProvisional: false } });
-        } finally {
-          if (blobUrl) await del(blobUrl).catch(() => {});
-        }
-      });
-
-      return NextResponse.json({ transcript: transcriptRow, title: titleNow, provisional: true });
-    }
-
-    // Geen live transcript → wacht op Whisper (online/hybride modus zonder SpeechRecognition)
-    const { text, segments } = await transcribeBestEffort(buffer, mimeType);
-
-    let title = meeting.title;
-    if ((title === "Naamloze meeting" || title === "Untitled Meeting") && text) {
-      title = await generateTitle(text);
-    }
-
-    const transcript = await prisma.transcript.upsert({
+    // Sla provisorisch op zodat de UI direct verder kan; Whisper draait op de achtergrond
+    const transcriptRow = await prisma.transcript.upsert({
       where: { meetingId: id },
-      update: { content: text, segments: JSON.stringify(segments), isProvisional: false },
-      create: { meetingId: id, content: text, segments: JSON.stringify(segments), isProvisional: false },
+      update: { content: "", segments: JSON.stringify([]), isProvisional: true },
+      create: { meetingId: id, content: "", segments: JSON.stringify([]), isProvisional: true },
     });
 
-    await prisma.meeting.update({ where: { id }, data: { status: "completed", title } });
-    if (blobUrl) await del(blobUrl).catch(() => {});
+    await prisma.meeting.update({ where: { id }, data: { status: "completed" } });
 
-    return NextResponse.json({ transcript, title, provisional: false });
+    // Whisper verwerkt de volledige opname op de achtergrond — werkt ook voor 1+ uur meetings
+    after(async () => {
+      try {
+        const { text, segments } = await transcribeBestEffort(buffer, mimeType);
+        await prisma.transcript.update({
+          where: { meetingId: id },
+          data: { content: text, segments: JSON.stringify(segments), isProvisional: false },
+        });
+        const m = await prisma.meeting.findUnique({ where: { id } });
+        if (m && text && (m.title === "Naamloze meeting" || m.title === "Untitled Meeting")) {
+          await prisma.meeting.update({ where: { id }, data: { title: await generateTitle(text) } });
+        }
+      } catch (err) {
+        console.error("Background Whisper error:", err);
+        await prisma.transcript.updateMany({ where: { meetingId: id }, data: { isProvisional: false } });
+      } finally {
+        if (blobUrl) await del(blobUrl).catch(() => {});
+      }
+    });
+
+    return NextResponse.json({ transcript: transcriptRow, provisional: true });
   } catch (err) {
     await prisma.meeting.update({ where: { id }, data: { status: "draft" } });
     const msg = err instanceof Error ? err.message : String(err);

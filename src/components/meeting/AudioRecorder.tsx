@@ -8,28 +8,6 @@ import { formatDuration } from "@/lib/utils";
 import type { RecordingState } from "@/types";
 import { cn } from "@/lib/utils";
 
-type SpeechRecognitionResultList = {
-  length: number;
-  [i: number]: { 0: { transcript: string }; isFinal: boolean };
-};
-
-type SpeechResultEvent = {
-  resultIndex: number;
-  results: SpeechRecognitionResultList;
-};
-
-type SpeechRecCtor = new () => {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  onresult: ((ev: SpeechResultEvent) => void) | null;
-  onerror: ((ev: Event) => void) | null;
-  onstart: (() => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-};
-
 export type TranscribeResultMeta = {
   provisional?: boolean;
 };
@@ -40,7 +18,6 @@ export type AudioCaptureMode = "physical" | "online" | "hybrid";
 type Props = {
   meetingId: string;
   onTranscribed: (transcript: string, title: string, meta?: TranscribeResultMeta) => void;
-  onLiveTranscript?: (text: string) => void;
 };
 
 const CHUNK_AFTER_SECONDS = 30 * 60;
@@ -64,24 +41,17 @@ function getDisplayMediaWithSystemAudio(primary: boolean): Promise<MediaStream> 
   } as DisplayMediaStreamOptions);
 }
 
-export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscript }: Props) {
+export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
   const [captureMode, setCaptureMode] = useState<AudioCaptureMode | null>(null);
   const [state, setState] = useState<RecordingState>("idle");
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
-  const [speechAvailable, setSpeechAvailable] = useState(false);
-  const [liveSpeechUserStarted, setLiveSpeechUserStarted] = useState(false);
-  const [speechStatus, setSpeechStatus] = useState<"off" | "listening" | "error">("off");
-  const [speechHint, setSpeechHint] = useState<string | null>(null);
-  const [lastProvisional, setLastProvisional] = useState(false);
   const [availableMics, setAvailableMics] = useState<MediaDeviceInfo[]>([]);
   const [selectedMicId, setSelectedMicId] = useState<string>("");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const liveSpeechFinalRef = useRef("");
-  const recognitionRef = useRef<InstanceType<SpeechRecCtor> | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -168,91 +138,10 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const w = window as unknown as { SpeechRecognition?: SpeechRecCtor; webkitSpeechRecognition?: SpeechRecCtor };
-    setSpeechAvailable(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
     loadMics();
     navigator.mediaDevices.addEventListener("devicechange", loadMics);
     return () => navigator.mediaDevices.removeEventListener("devicechange", loadMics);
   }, [loadMics]);
-
-  const getSpeechCtor = useCallback((): SpeechRecCtor | null => {
-    if (typeof window === "undefined") return null;
-    const w = window as unknown as { SpeechRecognition?: SpeechRecCtor; webkitSpeechRecognition?: SpeechRecCtor };
-    return w.SpeechRecognition || w.webkitSpeechRecognition || null;
-  }, []);
-
-  const stopSpeechRecognition = useCallback(() => {
-    try { recognitionRef.current?.stop(); } catch { /* ignore */ }
-    recognitionRef.current = null;
-    setSpeechStatus("off");
-  }, []);
-
-  const startSpeechRecognition = useCallback((resetAccumulated: boolean) => {
-    const Ctor = getSpeechCtor();
-    if (!Ctor) return;
-    if (resetAccumulated) {
-      liveSpeechFinalRef.current = "";
-      onLiveTranscript?.("");
-    }
-    const rec = new Ctor();
-    rec.lang = "nl-NL";
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.onresult = (event: SpeechResultEvent) => {
-      let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const t = event.results[i][0].transcript;
-        if (event.results[i].isFinal) liveSpeechFinalRef.current += `${t} `;
-        else interim += t;
-      }
-      onLiveTranscript?.(liveSpeechFinalRef.current + interim);
-    };
-    rec.onerror = (ev: Event) => {
-      const err = (ev as unknown as { error?: string }).error;
-      if (err === "aborted" || err === "no-speech") return;
-      setSpeechStatus("error");
-      if (err === "not-allowed") setSpeechHint("Microfoon geblokkeerd — controleer site-toestemming in de browser.");
-      else if (err === "audio-capture") setSpeechHint("Geen microfoon beschikbaar.");
-      else if (err === "network") setSpeechHint("Netwerkfout bij spraakherkenning.");
-      else setSpeechHint(`Spraakherkenning: ${err || "onbekende fout"}`);
-    };
-    rec.onstart = () => { setSpeechStatus("listening"); setSpeechHint(null); };
-    rec.onend = () => {
-      if (mediaRecorderRef.current?.state === "recording") {
-        try { rec.start(); } catch { /* herstart na limiet */ }
-      } else {
-        setSpeechStatus("off");
-      }
-    };
-    recognitionRef.current = rec;
-    try {
-      rec.start();
-    } catch {
-      setSpeechStatus("error");
-      setSpeechHint("Spraakherkenning start niet — probeer opnieuw.");
-      setLiveSpeechUserStarted(false);
-    }
-  }, [getSpeechCtor, onLiveTranscript]);
-
-  /** Handmatig starten van live spraak (online/hybrid) na scherm-dialog. */
-  const handleStartLiveSpeech = useCallback(async () => {
-    setSpeechHint(null);
-    const Ctor = getSpeechCtor();
-    if (!Ctor) {
-      setSpeechHint("Gebruik Chrome of Edge voor live ondertiteling.");
-      return;
-    }
-    try {
-      const constraints: MediaTrackConstraints = selectedMicId ? { deviceId: { exact: selectedMicId } } : {};
-      const mic = await navigator.mediaDevices.getUserMedia({ audio: constraints });
-      mic.getTracks().forEach((t) => t.stop());
-    } catch {
-      setSpeechHint("Geen microfoontoestemming — live tekst heeft een microfoon.");
-      return;
-    }
-    setLiveSpeechUserStarted(true);
-    startSpeechRecognition(true);
-  }, [getSpeechCtor, selectedMicId, startSpeechRecognition]);
 
   const stopAllStreams = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -274,9 +163,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
 
   const start = useCallback(async (mode: AudioCaptureMode) => {
     setError(null);
-    setLiveSpeechUserStarted(false);
-    setSpeechHint(null);
-    setSpeechStatus("off");
     activeModeRef.current = mode;
 
     try {
@@ -351,9 +237,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
 
       startVolumeMonitor(recordStream);
 
-      // Spraakherkenning auto-starten voor alle modi
-      startSpeechRecognition(true);
-
       await fetch(`/api/meetings/${meetingId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -367,23 +250,21 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
         setError(msg || "Opname starten mislukt");
       }
     }
-  }, [meetingId, clearChunkRequestInterval, maybeStartLongRecordingChunking, startSpeechRecognition, micAudioConstraints]);
+  }, [meetingId, clearChunkRequestInterval, maybeStartLongRecordingChunking, micAudioConstraints]);
 
   const pause = useCallback(() => {
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.pause();
       clearChunkRequestInterval();
-      stopSpeechRecognition();
       setState("paused");
       if (timerRef.current) clearInterval(timerRef.current);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     }
-  }, [clearChunkRequestInterval, stopSpeechRecognition]);
+  }, [clearChunkRequestInterval]);
 
   const resume = useCallback(() => {
     if (mediaRecorderRef.current?.state === "paused") {
       mediaRecorderRef.current.resume();
-      startSpeechRecognition(false);
       setState("recording");
       const pausedAt = Date.now() - duration * 1000;
       timerRef.current = setInterval(() => {
@@ -393,7 +274,7 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       }, 1000);
       if (streamRef.current) startVolumeMonitor(streamRef.current);
     }
-  }, [duration, startSpeechRecognition, maybeStartLongRecordingChunking]);
+  }, [duration, maybeStartLongRecordingChunking]);
 
   const stop = useCallback(async () => {
     if (!mediaRecorderRef.current) return;
@@ -408,7 +289,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       mediaRecorderRef.current!.stop();
     });
 
-    stopSpeechRecognition();
     stopAllStreams();
 
     const mimeType = mediaRecorderRef.current.mimeType || "audio/webm";
@@ -424,13 +304,9 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       setProgress((p) => Math.min(90, p + 5));
     }, 500);
 
-    // Live-tekst opslaan vóór speech recognition stopt
-    const liveText = liveSpeechFinalRef.current.trim();
-
     try {
       const formData = new FormData();
       formData.append("mimeType", mimeType);
-      if (liveText) formData.append("liveTranscript", liveText);
 
       // Probeer eerst via Vercel Blob (omzeilt de 4.5 MB Vercel body-limiet)
       let blobUploaded = false;
@@ -457,19 +333,17 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
       }
       const data = await res.json();
       const transcript = data.transcript?.content || data.transcript || "";
-      const isProvisional = Boolean(data.provisional);
 
       clearInterval(progressInterval);
       setProgress(100);
-      setLastProvisional(isProvisional);
       setState("done");
-      onTranscribed(transcript, "", { provisional: isProvisional });
+      onTranscribed(transcript, "", { provisional: true });
     } catch (err: unknown) {
       clearInterval(progressInterval);
       setError(err instanceof Error ? err.message : "Transcriptie mislukt");
       setState("idle");
     }
-  }, [meetingId, duration, onTranscribed, stopAllStreams, stopSpeechRecognition, clearChunkRequestInterval]);
+  }, [meetingId, duration, onTranscribed, stopAllStreams, clearChunkRequestInterval]);
 
   useEffect(() => {
     return () => {
@@ -499,12 +373,10 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
           <Mic className="h-6 w-6 text-green-600" />
         </div>
-        <p className="font-medium text-green-700">Transcriptie klaar</p>
-        {lastProvisional && (
-          <p className="text-xs text-center text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 max-w-md">
-            Whisper verfijnt het transcript op de achtergrond. Je kunt al notulen genereren.
-          </p>
-        )}
+        <p className="font-medium text-green-700">Opname ingediend</p>
+        <p className="text-xs text-center text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 max-w-md">
+          Whisper verwerkt de transcriptie op de achtergrond. Zodra klaar kun je notulen genereren.
+        </p>
         <p className="text-sm text-green-600">Duur: {formatDuration(duration)}</p>
       </div>
     );
@@ -681,57 +553,6 @@ export default function AudioRecorder({ meetingId, onTranscribed, onLiveTranscri
           <p className="text-center text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 max-w-md">
             Laat het gedeelde scherm of venster open tot je op Stop drukt — anders stopt de opname mee.
           </p>
-        )}
-
-        {/* Live spraak status */}
-        {(state === "recording" || state === "paused") && (
-          <div className="w-full max-w-xl space-y-2">
-            {!speechAvailable && (
-              <p className="text-[11px] text-gray-500">
-                Live ondertiteling werkt in Chrome of Edge. Whisper transcribeert na afloop.
-              </p>
-            )}
-
-            {/* Online/hybride: extra knop voor handmatig starten na scherm-dialog */}
-            {speechAvailable && activeModeRef.current !== "physical" && !liveSpeechUserStarted && speechStatus === "off" && (
-              <div className="rounded-lg border border-indigo-200 bg-indigo-50/80 p-3 space-y-2">
-                <p className="text-[11px] text-indigo-900 leading-relaxed">
-                  Live spraak kon niet automatisch starten na het scherm delen — Chrome vereist soms een extra klik.
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  className="w-full gap-2 bg-indigo-600 text-white hover:bg-indigo-700"
-                  onClick={handleStartLiveSpeech}
-                  disabled={state === "paused"}
-                >
-                  <Mic className="h-4 w-4" />
-                  Start live meeschrijven
-                </Button>
-              </div>
-            )}
-
-            {speechHint && (
-              <p className="text-[11px] text-red-700 bg-red-50 border border-red-100 rounded px-2 py-1.5">
-                {speechHint}
-              </p>
-            )}
-
-            {speechStatus !== "off" && (
-              <div className="flex items-center gap-2 text-[11px] text-gray-600">
-                <span
-                  className={cn(
-                    "inline-flex h-2 w-2 rounded-full",
-                    speechStatus === "listening" ? "bg-green-500 animate-pulse" : "bg-gray-300"
-                  )}
-                />
-                {speechStatus === "listening"
-                  ? "Luistert — live transcript wordt bijgehouden"
-                  : "Gestopt — zie melding hierboven"}
-              </div>
-            )}
-          </div>
         )}
       </div>
     </div>

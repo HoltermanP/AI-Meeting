@@ -45,7 +45,6 @@ export default function MeetingDetailPage() {
   const pdfSourceRef = useRef<HTMLDivElement>(null);
   const emptyActionItems = useMemo(() => [], []);
   const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
-  const [liveTranscript, setLiveTranscript] = useState("");
 
   useEffect(() => {
     loadMeeting();
@@ -542,22 +541,20 @@ const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).len
                 <AudioRecorder
                   meetingId={id}
                   onTranscribed={onTranscribed}
-                  onLiveTranscript={setLiveTranscript}
                 />
               </div>
             )}
 
-            {/* Transcript — live tijdens opname, definitief erna */}
-            {(liveTranscript || meeting.transcript) && (
+            {/* Transcript — getoond zodra beschikbaar, "Voorlopig" zolang Whisper nog bezig is */}
+            {meeting.transcript && (
               <div>
                 <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                   <FileText className="h-4 w-4" /> Transcript
                 </h2>
                 <TranscriptView
-                  content={liveTranscript || meeting.transcript?.content || ""}
+                  content={meeting.transcript?.content || ""}
                   segments={meeting.transcript?.segments ? JSON.parse(meeting.transcript.segments as string) : []}
-                  isLive={Boolean(liveTranscript && meeting.status !== "completed")}
-                  isProvisional={!liveTranscript && Boolean(meeting.transcript?.isProvisional)}
+                  isProvisional={Boolean(meeting.transcript?.isProvisional)}
                 />
               </div>
             )}
