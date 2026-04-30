@@ -346,13 +346,15 @@ export async function transcribeAudio(
   text: string;
   segments: Array<{ start: number; end: number; text: string }>;
 }> {
-  const ext = mimeType.includes("mp4")
-    ? "mp4"
-    : mimeType.includes("wav")
-      ? "wav"
-      : mimeType.includes("ogg")
-        ? "ogg"
-        : "webm";
+  const ext = mimeType.includes("mp3") || mimeType.includes("mpeg") || mimeType.includes("mpga")
+    ? "mp3"
+    : mimeType.includes("mp4") || mimeType.includes("m4a")
+      ? "mp4"
+      : mimeType.includes("wav")
+        ? "wav"
+        : mimeType.includes("ogg")
+          ? "ogg"
+          : "webm";
 
   const tmpPath = join(tmpdir(), `recording-${Date.now()}.${ext}`);
 

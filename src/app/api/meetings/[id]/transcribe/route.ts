@@ -3,71 +3,150 @@ import { after } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { transcribeAudio, generateTitle } from "@/lib/openai";
-import { writeFile, unlink, readFile } from "fs/promises";
+import { writeFile, unlink, readFile, mkdtemp, readdir, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { spawn } from "child_process";
 import { del } from "@vercel/blob";
+import ffmpegStatic from "ffmpeg-static";
 
 export const maxDuration = 300;
+
+/**
+ * Pad naar de meegebundelde ffmpeg-binary (werkt zowel lokaal als op Vercel).
+ * Fallback op systeem-ffmpeg als de package om wat voor reden niets oplevert.
+ */
+const FFMPEG_PATH: string = ffmpegStatic || "ffmpeg";
 
 /** Whisper max: 25 MB. We houden 1 MB marge. */
 const WHISPER_MAX_BYTES = 24 * 1024 * 1024;
 
+/** Chunk-lengte (sec) bij splitsen van te grote opnames; 10 min ≈ 1,8 MB MP3 mono 24 kbps. */
+const CHUNK_DURATION_SECONDS = 10 * 60;
+
+/** Maximaal aantal chunks dat tegelijk naar Whisper wordt gestuurd. */
+const CHUNK_CONCURRENCY = 4;
+
+/** Aantal retries per chunk bij Whisper-fouten (rate-limit / transient). */
+const CHUNK_RETRIES = 2;
+
+type WhisperResult = { text: string; segments: Array<{ start: number; end: number; text: string }> };
+
 /**
- * Comprimeert audio naar 16 kHz mono MP3 via ffmpeg.
- * Retourneert null als ffmpeg niet beschikbaar is.
+ * Splits `inputPath` met ffmpeg in MP3-chunks van `chunkSeconds` (16 kHz mono 24 kbps).
+ * Retourneert paden van de gegenereerde chunks (gesorteerd op volgorde).
  */
-async function compressAudio(inputPath: string, outputPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const ff = spawn("ffmpeg", [
+async function splitAudioIntoChunks(
+  inputPath: string,
+  outDir: string,
+  chunkSeconds: number
+): Promise<string[]> {
+  const ok = await new Promise<boolean>((resolve) => {
+    const ff = spawn(FFMPEG_PATH, [
       "-y", "-i", inputPath,
       "-ar", "16000",
       "-ac", "1",
       "-b:a", "24k",
-      outputPath,
+      "-f", "segment",
+      "-segment_time", String(chunkSeconds),
+      "-reset_timestamps", "1",
+      join(outDir, "chunk-%03d.mp3"),
     ]);
     ff.on("close", (code) => resolve(code === 0));
     ff.on("error", () => resolve(false));
   });
+  if (!ok) throw new Error("ffmpeg-splitsing mislukt");
+
+  const files = (await readdir(outDir))
+    .filter((f) => f.startsWith("chunk-") && f.endsWith(".mp3"))
+    .sort();
+  if (files.length === 0) throw new Error("ffmpeg leverde geen chunks op");
+  return files.map((f) => join(outDir, f));
+}
+
+/** Whisper-call met simpele retry voor transient fouten (rate limit / netwerk). */
+async function transcribeWithRetry(buffer: Buffer, mimeType: string): Promise<WhisperResult> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= CHUNK_RETRIES; attempt++) {
+    try {
+      return await transcribeAudio(buffer, mimeType);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < CHUNK_RETRIES) {
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 /**
- * Stuurt audio naar Whisper. Als het bestand te groot is, probeert het eerst
- * te comprimeren via ffmpeg. Geeft een duidelijke fout als dat ook niet lukt.
+ * Splits het bestand in chunks, transcribeert ze parallel (CHUNK_CONCURRENCY tegelijk),
+ * en plakt teksten + segmenten weer in chronologische volgorde aan elkaar.
+ * Tijdstempels van segmenten worden gecorrigeerd met de chunk-offset.
  */
-async function transcribeBestEffort(
-  buffer: Buffer,
-  mimeType: string
-): Promise<{ text: string; segments: Array<{ start: number; end: number; text: string }> }> {
+async function transcribeChunked(inputPath: string, chunkSeconds: number): Promise<WhisperResult> {
+  const tmpDir = await mkdtemp(join(tmpdir(), "whisper-chunks-"));
+  try {
+    const files = await splitAudioIntoChunks(inputPath, tmpDir, chunkSeconds);
+    const results: WhisperResult[] = new Array(files.length);
+
+    let cursor = 0;
+    const worker = async () => {
+      while (true) {
+        const i = cursor++;
+        if (i >= files.length) return;
+        const buf = await readFile(files[i]);
+        const r = await transcribeWithRetry(buf, "audio/mp3");
+        const offset = i * chunkSeconds;
+        results[i] = {
+          text: r.text,
+          segments: r.segments.map((s) => ({
+            start: s.start + offset,
+            end: s.end + offset,
+            text: s.text,
+          })),
+        };
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(CHUNK_CONCURRENCY, files.length) }, () => worker())
+    );
+
+    return {
+      text: results.map((r) => r.text.trim()).filter(Boolean).join(" "),
+      segments: results.flatMap((r) => r.segments),
+    };
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Stuurt audio naar Whisper. Bij te grote bestanden wordt automatisch gechunked
+ * (en gecomprimeerd) via ffmpeg, zodat ook lange opnames binnen het Vercel-budget passen.
+ */
+async function transcribeBestEffort(buffer: Buffer, mimeType: string): Promise<WhisperResult> {
   if (buffer.length <= WHISPER_MAX_BYTES) {
     return transcribeAudio(buffer, mimeType);
   }
 
-  // Bestand te groot → probeer te comprimeren via ffmpeg
   const ext = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
   const inputPath = join(tmpdir(), `rec-in-${Date.now()}.${ext}`);
-  const outputPath = join(tmpdir(), `rec-out-${Date.now()}.mp3`);
 
   try {
     await writeFile(inputPath, buffer);
-    const ok = await compressAudio(inputPath, outputPath);
-
-    if (ok) {
-      const compressed = await readFile(outputPath);
-      if (compressed.length <= WHISPER_MAX_BYTES) {
-        return transcribeAudio(compressed, "audio/mp3");
-      }
-    }
+    return await transcribeChunked(inputPath, CHUNK_DURATION_SECONDS);
+  } catch (err) {
+    const sizeMb = Math.round(buffer.length / 1024 / 1024);
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Audio-bestand (${sizeMb} MB) kon niet via chunked Whisper verwerkt worden: ${reason}.`
+    );
   } finally {
     await unlink(inputPath).catch(() => {});
-    await unlink(outputPath).catch(() => {});
   }
-
-  throw new Error(
-    `Audio-bestand is te groot voor Whisper (${Math.round(buffer.length / 1024 / 1024)} MB, max 24 MB). ` +
-    `Installeer ffmpeg via 'brew install ffmpeg' voor automatische compressie.`
-  );
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
