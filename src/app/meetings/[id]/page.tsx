@@ -298,20 +298,42 @@ export default function MeetingDetailPage() {
   }
 
   const onTranscribed = useCallback(
-    (transcript: string, newTitle: string, meta?: { provisional?: boolean }) => {
-setMeeting((m: any) => ({
+    async (_transcript: string, newTitle: string, meta?: { provisional?: boolean }) => {
+      // Eerste call (provisional=true): lokaal isProvisional aanzetten zodat de
+      // polling-loop hieronder begint te pollen — dan groeit de transcriptie
+      // per chunk vanzelf in de UI.
+      if (meta?.provisional) {
+        setMeeting((m: any) => ({
+          ...(m || {}),
+          status: "processing",
+          transcript: { ...(m?.transcript || {}), isProvisional: true },
+        }));
+        return;
+      }
+      // Finale call (provisional=false): haal definitieve data op uit DB
+      try {
+        const res = await fetch(`/api/meetings/${id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setMeeting(data);
+          if (data.title) setTitle(data.title);
+          return;
+        }
+      } catch {
+        /* fallback hieronder */
+      }
+      setMeeting((m: any) => ({
         ...m,
         status: "completed",
         title: newTitle || m.title,
         transcript: {
           ...m.transcript,
-          content: transcript,
-          isProvisional: Boolean(meta?.provisional),
+          isProvisional: false,
         },
       }));
       if (newTitle) setTitle(newTitle);
     },
-    []
+    [id]
   );
 
   useEffect(() => {
@@ -321,10 +343,13 @@ setMeeting((m: any) => ({
       fetch(`/api/meetings/${id}`)
         .then((r) => r.json())
         .then((data) => {
-          if (!data?.transcript?.isProvisional) {
-            setMeeting(data);
-            if (data.title) setTitle(data.title);
-          }
+          if (!data) return;
+          // Tijdens chunk-uploads: refresh de meeting state zodat de UI de
+          // groeiende transcript-content live laat zien. Bij definitieve klaar
+          // (isProvisional=false) ook setMeeting — de polling stopt vanzelf
+          // omdat dit useEffect dan opnieuw evalueert met prov=false.
+          setMeeting(data);
+          if (data.title) setTitle(data.title);
         })
         .catch(() => {});
     }, 4000);

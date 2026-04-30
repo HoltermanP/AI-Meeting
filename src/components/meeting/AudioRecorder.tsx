@@ -464,6 +464,10 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     }
 
     try {
+      // Trigger meteen een eerste refresh zodat de UI uit "Voorlopig"-modus gaat
+      // en de polling-loop in de meetingpagina elke 4s verse transcript-data toont.
+      onTranscribed("", "", { provisional: true });
+
       for (let i = 0; i < total; i++) {
         const seg = segments[i];
         await uploadSegment(seg.blob, i, total, seg.offsetSeconds, finalDuration);
