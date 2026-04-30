@@ -3,7 +3,7 @@ import { after } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { transcribeAudio, generateTitle } from "@/lib/openai";
-import { writeFile, unlink, readFile, mkdtemp, readdir, rm } from "fs/promises";
+import { writeFile, unlink, readFile, mkdtemp, readdir, rm, stat, chmod } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { spawn } from "child_process";
@@ -17,6 +17,31 @@ export const maxDuration = 300;
  * Fallback op systeem-ffmpeg als de package om wat voor reden niets oplevert.
  */
 const FFMPEG_PATH: string = ffmpegStatic || "ffmpeg";
+
+/**
+ * Zorgt eenmalig dat het ffmpeg-pad beschikbaar én executable is.
+ * Op Vercel verliest een meegebundelde binary soms zijn execute-bit.
+ */
+let ffmpegReadyPromise: Promise<string> | null = null;
+async function ensureFfmpegReady(): Promise<string> {
+  if (!ffmpegReadyPromise) {
+    ffmpegReadyPromise = (async () => {
+      console.log(`[transcribe] ffmpeg path = ${FFMPEG_PATH}`);
+      try {
+        const s = await stat(FFMPEG_PATH);
+        console.log(`[transcribe] ffmpeg binary OK (size=${s.size} bytes, mode=${s.mode.toString(8)})`);
+        await chmod(FFMPEG_PATH, 0o755).catch((e) =>
+          console.warn(`[transcribe] chmod ffmpeg faalde (mogelijk read-only FS): ${e}`)
+        );
+      } catch (err) {
+        console.error(`[transcribe] ffmpeg-binary niet vindbaar op ${FFMPEG_PATH}:`, err);
+        throw new Error(`ffmpeg-binary niet beschikbaar op ${FFMPEG_PATH}`);
+      }
+      return FFMPEG_PATH;
+    })();
+  }
+  return ffmpegReadyPromise;
+}
 
 /** Whisper max: 25 MB. We houden 1 MB marge. */
 const WHISPER_MAX_BYTES = 24 * 1024 * 1024;
@@ -41,8 +66,11 @@ async function splitAudioIntoChunks(
   outDir: string,
   chunkSeconds: number
 ): Promise<string[]> {
-  const ok = await new Promise<boolean>((resolve) => {
-    const ff = spawn(FFMPEG_PATH, [
+  const ffmpegPath = await ensureFfmpegReady();
+  const start = Date.now();
+
+  const { code, stderr } = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+    const ff = spawn(ffmpegPath, [
       "-y", "-i", inputPath,
       "-ar", "16000",
       "-ac", "1",
@@ -52,15 +80,27 @@ async function splitAudioIntoChunks(
       "-reset_timestamps", "1",
       join(outDir, "chunk-%03d.mp3"),
     ]);
-    ff.on("close", (code) => resolve(code === 0));
-    ff.on("error", () => resolve(false));
+    let err = "";
+    ff.stderr?.on("data", (d) => {
+      err += d.toString();
+      if (err.length > 4000) err = err.slice(-4000);
+    });
+    ff.on("close", (c) => resolve({ code: c, stderr: err }));
+    ff.on("error", (e) => resolve({ code: -1, stderr: `spawn-error: ${e.message}\n${err}` }));
   });
-  if (!ok) throw new Error("ffmpeg-splitsing mislukt");
+
+  const elapsed = Date.now() - start;
+  if (code !== 0) {
+    console.error(`[transcribe] ffmpeg exit=${code} (${elapsed}ms). stderr-tail:\n${stderr}`);
+    throw new Error(`ffmpeg-splitsing mislukt (exit ${code}): ${stderr.slice(-300)}`);
+  }
+  console.log(`[transcribe] ffmpeg klaar in ${elapsed}ms`);
 
   const files = (await readdir(outDir))
     .filter((f) => f.startsWith("chunk-") && f.endsWith(".mp3"))
     .sort();
   if (files.length === 0) throw new Error("ffmpeg leverde geen chunks op");
+  console.log(`[transcribe] ${files.length} chunks aangemaakt`);
   return files.map((f) => join(outDir, f));
 }
 
@@ -194,20 +234,31 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     // Whisper verwerkt de volledige opname op de achtergrond — werkt ook voor 1+ uur meetings
     after(async () => {
+      const t0 = Date.now();
+      console.log(`[transcribe ${id}] after() gestart, source=${capturedBlobUrl ? "blob" : "direct"}`);
       let buffer: Buffer;
       try {
         if (capturedBlobUrl) {
-          // Grote bestanden: download hier (buiten de response-latency)
+          const dlStart = Date.now();
           const audioRes = await fetch(capturedBlobUrl);
           if (!audioRes.ok) throw new Error(`Blob download mislukt (${audioRes.status})`);
           buffer = Buffer.from(await audioRes.arrayBuffer());
+          console.log(
+            `[transcribe ${id}] blob gedownload: ${Math.round(buffer.length / 1024 / 1024)} MB in ${Date.now() - dlStart}ms`
+          );
         } else if (capturedBuffer) {
           buffer = capturedBuffer;
+          console.log(`[transcribe ${id}] direct buffer: ${Math.round(buffer.length / 1024 / 1024)} MB`);
         } else {
           throw new Error("Geen audiodata beschikbaar");
         }
 
+        const wStart = Date.now();
         const { text, segments } = await transcribeBestEffort(buffer, capturedMimeType);
+        console.log(
+          `[transcribe ${id}] Whisper klaar in ${Date.now() - wStart}ms — ${text.length} chars, ${segments.length} segments`
+        );
+
         await prisma.transcript.update({
           where: { meetingId: id },
           data: { content: text, segments: JSON.stringify(segments), isProvisional: false },
@@ -216,10 +267,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         if (m && text && (m.title === "Naamloze meeting" || m.title === "Untitled Meeting")) {
           await prisma.meeting.update({ where: { id }, data: { title: await generateTitle(text) } });
         }
+        console.log(`[transcribe ${id}] OK — totaal ${Date.now() - t0}ms`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error("Background Whisper error:", msg);
-        // Foutmelding opslaan in het transcript zodat de gebruiker het ziet via polling
+        console.error(`[transcribe ${id}] FAIL na ${Date.now() - t0}ms:`, msg);
         await prisma.transcript.updateMany({
           where: { meetingId: id },
           data: {

@@ -7,11 +7,26 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "200mb",
     },
   },
-  // ffmpeg-static levert een binary die NIET door de Next bundler moet worden aangeraakt
+  // Native binaries / modules die Next NIET moet bundelen
   serverExternalPackages: ["ffmpeg-static"],
-  // Forceer dat de juiste platform-binary van ffmpeg in de Vercel-function wordt meegebundeld
+  // Forceer dat ffmpeg-binary én Prisma-client in elke Vercel-function meekomen.
+  // App Router heeft inconsistente trace-keys, dus dekken we het breed af.
   outputFileTracingIncludes: {
-    "/api/meetings/**": ["./node_modules/ffmpeg-static/ffmpeg"],
+    "/api/meetings/**/*": [
+      "./node_modules/ffmpeg-static/ffmpeg",
+      "./node_modules/ffmpeg-static/index.js",
+      "./node_modules/ffmpeg-static/package.json",
+    ],
+    "/api/diag/**/*": [
+      "./node_modules/ffmpeg-static/ffmpeg",
+      "./node_modules/ffmpeg-static/index.js",
+      "./node_modules/ffmpeg-static/package.json",
+    ],
+    "/*": [
+      "./node_modules/ffmpeg-static/ffmpeg",
+      "./node_modules/ffmpeg-static/index.js",
+      "./node_modules/ffmpeg-static/package.json",
+    ],
   },
 };
 
