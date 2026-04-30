@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Mic, MicOff, Pause, Play, Square, Loader2, Monitor, Users, RefreshCw, ChevronDown } from "lucide-react";
+import { Mic, MicOff, Pause, Play, Square, Loader2, Monitor, Users, RefreshCw, ChevronDown, Smartphone, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { formatDuration } from "@/lib/utils";
@@ -22,6 +22,19 @@ type Props = {
 
 const CHUNK_AFTER_SECONDS = 30 * 60;
 const CHUNK_INTERVAL_MS = 1000;
+
+/** Heuristiek: herkent labels van iPhones, Continuity-microfoons en typische telefoon-Bluetooth-namen. */
+function isPhoneMic(label: string): boolean {
+  const l = label.toLowerCase();
+  return (
+    l.includes("iphone") ||
+    l.includes("ipad") ||
+    l.includes("continuity") ||
+    /\bandroid\b/.test(l) ||
+    /\bgalaxy\b/.test(l) ||
+    /\bpixel\b/.test(l)
+  );
+}
 
 /** Schermdeling met systeemaudio. */
 function getDisplayMediaWithSystemAudio(primary: boolean): Promise<MediaStream> {
@@ -50,6 +63,10 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
   const [progress, setProgress] = useState(0);
   const [availableMics, setAvailableMics] = useState<MediaDeviceInfo[]>([]);
   const [selectedMicId, setSelectedMicId] = useState<string>("");
+  /** Bij fysieke meeting: gebruiker moet expliciet aangeven of een telefoon als microfoon gekoppeld wordt. */
+  const [usePhoneMic, setUsePhoneMic] = useState<"unset" | "yes" | "no">("unset");
+  /** Onthoudt of de selectie automatisch op een telefoon-mic is gezet, zodat we niet over een handmatige keuze heen schrijven. */
+  const autoSelectedPhoneRef = useRef(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -142,6 +159,45 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     navigator.mediaDevices.addEventListener("devicechange", loadMics);
     return () => navigator.mediaDevices.removeEventListener("devicechange", loadMics);
   }, [loadMics]);
+
+  /** Telefoon uit de huidige lijst (eerste match). */
+  const detectedPhoneMic = availableMics.find((m) => isPhoneMic(m.label || ""));
+
+  /**
+   * Voorselecteer telefoon-microfoon zodra die beschikbaar is en gebruiker "Ja" koos.
+   * Schrijft niet over een latere handmatige keuze heen.
+   */
+  useEffect(() => {
+    if (usePhoneMic !== "yes") return;
+    if (!detectedPhoneMic) return;
+    if (selectedMicId === detectedPhoneMic.deviceId) return;
+    if (autoSelectedPhoneRef.current) return;
+    setSelectedMicId(detectedPhoneMic.deviceId);
+    autoSelectedPhoneRef.current = true;
+  }, [usePhoneMic, detectedPhoneMic, selectedMicId]);
+
+  /** Reset de "auto-geselecteerde" vlag als de gebruiker handmatig een andere mic kiest. */
+  useEffect(() => {
+    if (!detectedPhoneMic) return;
+    if (selectedMicId !== detectedPhoneMic.deviceId) {
+      autoSelectedPhoneRef.current = false;
+    }
+  }, [selectedMicId, detectedPhoneMic]);
+
+  /** Bij "Ja" actief blijven scannen tot iPhone gevonden — devicechange-event vuurt niet altijd voor Continuity. */
+  useEffect(() => {
+    if (usePhoneMic !== "yes" || detectedPhoneMic) return;
+    const t = setInterval(() => loadMics(), 2000);
+    return () => clearInterval(t);
+  }, [usePhoneMic, detectedPhoneMic, loadMics]);
+
+  /** Reset telefoon-keuze als de gebruiker geen fysieke meeting (meer) doet. */
+  useEffect(() => {
+    if (captureMode !== "physical") {
+      setUsePhoneMic("unset");
+      autoSelectedPhoneRef.current = false;
+    }
+  }, [captureMode]);
 
   const stopAllStreams = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -509,6 +565,89 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
                 </button>
               ))}
             </div>
+            {/* iPhone-koppeling — alleen relevant bij fysieke meeting */}
+            {captureMode === "physical" && (
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <Smartphone className="h-4 w-4 text-indigo-600 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-xs font-semibold text-gray-800">
+                      Telefoon als microfoon koppelen?
+                    </p>
+                    <p className="text-[11px] text-gray-600 mt-0.5">
+                      Een iPhone (of Android) midden op tafel pakt vaak meer stemmen op dan de laptop-microfoon.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setUsePhoneMic("yes")}
+                    className={cn(
+                      "rounded-lg border-2 px-3 py-2 text-xs font-medium transition-colors",
+                      usePhoneMic === "yes"
+                        ? "border-indigo-500 bg-white text-indigo-700"
+                        : "border-gray-200 bg-white text-gray-600 hover:border-indigo-300"
+                    )}
+                  >
+                    Ja, telefoon gebruiken
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUsePhoneMic("no");
+                      autoSelectedPhoneRef.current = false;
+                      const firstNonPhone = availableMics.find((m) => !isPhoneMic(m.label || ""));
+                      if (firstNonPhone) setSelectedMicId(firstNonPhone.deviceId);
+                    }}
+                    className={cn(
+                      "rounded-lg border-2 px-3 py-2 text-xs font-medium transition-colors",
+                      usePhoneMic === "no"
+                        ? "border-indigo-500 bg-white text-indigo-700"
+                        : "border-gray-200 bg-white text-gray-600 hover:border-indigo-300"
+                    )}
+                  >
+                    Nee, laptop-microfoon
+                  </button>
+                </div>
+
+                {usePhoneMic === "yes" && (
+                  <div className="rounded-lg bg-white border border-indigo-100 px-3 py-2 text-[11px] leading-relaxed text-gray-700 space-y-1.5">
+                    {detectedPhoneMic ? (
+                      <p className="flex items-center gap-1.5 text-emerald-700 font-medium">
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                        Telefoon gevonden: {detectedPhoneMic.label || "iPhone-microfoon"} — automatisch geselecteerd.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="flex items-center gap-1.5 text-amber-700 font-medium">
+                          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                          Wacht op telefoon…
+                        </p>
+                        <ul className="list-disc pl-4 space-y-0.5 text-gray-600">
+                          <li>
+                            <strong>iPhone (Continuity):</strong> ontgrendel je iPhone in de buurt van je Mac (zelfde Apple-account, Wi-Fi + Bluetooth aan).
+                          </li>
+                          <li>
+                            <strong>Via kabel:</strong> sluit je telefoon met USB aan en sta microfoon-toegang toe.
+                          </li>
+                          <li>
+                            <strong>Bluetooth-headset/telefoon:</strong> koppel als audio-apparaat in macOS-instellingen.
+                          </li>
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {usePhoneMic === "unset" && (
+                  <p className="text-[11px] text-amber-700">
+                    Maak een keuze zodat je weet welke microfoon de opname maakt.
+                  </p>
+                )}
+              </div>
+            )}
+
             <Button
               onClick={() => captureMode && start(captureMode)}
               disabled={!captureMode}

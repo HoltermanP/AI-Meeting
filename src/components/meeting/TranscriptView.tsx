@@ -8,7 +8,7 @@ import { formatDuration } from "@/lib/utils";
 import type { TranscriptSegment } from "@/types";
 
 type Props = {
-  content: string;
+  content: string | null | undefined;
   segments?: TranscriptSegment[];
   /** Whisper is nog bezig — transcript wordt straks bijgewerkt. */
   isProvisional?: boolean;
@@ -18,7 +18,16 @@ export default function TranscriptView({ content, segments = [], isProvisional }
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
 
-  const isFailed = content.startsWith("⚠️ Transcriptie mislukt");
+  const safeContent =
+    typeof content === "string"
+      ? content
+      : content == null
+        ? ""
+        : typeof content === "object"
+          ? JSON.stringify(content)
+          : String(content);
+
+  const isFailed = safeContent.startsWith("⚠️ Transcriptie mislukt");
 
   const filtered = search
     ? segments.filter((s) =>
@@ -88,7 +97,7 @@ export default function TranscriptView({ content, segments = [], isProvisional }
 
       {isFailed && !collapsed && (
         <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 whitespace-pre-wrap">
-          {content}
+          {safeContent}
         </p>
       )}
 
@@ -106,8 +115,8 @@ export default function TranscriptView({ content, segments = [], isProvisional }
                   </p>
                 </div>
               ))
-            ) : content ? (
-              <p className="text-sm text-gray-500 whitespace-pre-wrap">{content}</p>
+            ) : safeContent ? (
+              <p className="text-sm text-gray-500 whitespace-pre-wrap">{safeContent}</p>
             ) : (
               <p className="text-sm text-gray-400 italic">Transcript wordt verwerkt…</p>
             )}

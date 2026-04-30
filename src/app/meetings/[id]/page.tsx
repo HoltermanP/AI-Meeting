@@ -552,8 +552,27 @@ const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).len
                   <FileText className="h-4 w-4" /> Transcript
                 </h2>
                 <TranscriptView
-                  content={meeting.transcript?.content || ""}
-                  segments={meeting.transcript?.segments ? JSON.parse(meeting.transcript.segments as string) : []}
+                  content={
+                    typeof meeting.transcript?.content === "string"
+                      ? meeting.transcript.content
+                      : meeting.transcript?.content
+                        ? JSON.stringify(meeting.transcript.content)
+                        : ""
+                  }
+                  segments={(() => {
+                    const raw = meeting.transcript?.segments;
+                    if (!raw) return [];
+                    if (Array.isArray(raw)) return raw;
+                    if (typeof raw === "string") {
+                      try {
+                        const parsed = JSON.parse(raw);
+                        return Array.isArray(parsed) ? parsed : [];
+                      } catch {
+                        return [];
+                      }
+                    }
+                    return [];
+                  })()}
                   isProvisional={Boolean(meeting.transcript?.isProvisional)}
                 />
               </div>
