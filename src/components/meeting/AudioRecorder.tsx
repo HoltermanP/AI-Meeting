@@ -107,8 +107,9 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
 
   const pickMimeTypeRef = useRef<() => string>(() => "audio/webm");
 
-  const startVolumeMonitor = (stream: MediaStream) => {
-    const ctx = new AudioContext();
+  const startVolumeMonitor = (stream: MediaStream, existingCtx?: AudioContext) => {
+    const ctx = existingCtx ?? new AudioContext();
+    if (!existingCtx) audioCtxRef.current = ctx;
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
@@ -252,6 +253,10 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     echoCancellation: true,
     noiseSuppression: true,
     autoGainControl: true,
+    // Chrome-hint: voorkomt dat macOS andere audio zachter zet (audio ducking)
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    googDucking: false,
   }), [selectedMicId]);
 
   /**
@@ -354,7 +359,9 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       }, 1000);
 
       scheduleNextRotate();
-      startVolumeMonitor(recordStream);
+      // Hergebruik de bestaande AudioContext bij online/hybride om te voorkomen dat
+      // een tweede context macOS-ducking opnieuw triggert.
+      startVolumeMonitor(recordStream, audioCtxRef.current ?? undefined);
 
       await fetch(`/api/meetings/${meetingId}`, {
         method: "PUT",
@@ -395,7 +402,7 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
         setDuration(secs);
       }, 1000);
       scheduleNextRotate();
-      if (streamRef.current) startVolumeMonitor(streamRef.current);
+      if (streamRef.current) startVolumeMonitor(streamRef.current, audioCtxRef.current ?? undefined);
     }
   }, [duration, scheduleNextRotate]);
 
