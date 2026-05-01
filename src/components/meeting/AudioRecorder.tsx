@@ -27,18 +27,30 @@ const SEGMENT_DURATION_SECONDS = 7 * 60;
 const CHUNK_INTERVAL_MS = 1000;
 
 /**
- * Vraagt schermdeling met systeemaudio. Één aanroep — geen retry die de
+ * Vraagt schermdeling met audio. Één aanroep — geen retry die de
  * "user gesture handler"-fout zou veroorzaken.
  */
-function getDisplayMediaWithSystemAudio(): Promise<MediaStream> {
+function getDisplayMediaWithAudio(): Promise<MediaStream> {
   return navigator.mediaDevices.getDisplayMedia({
     video: true,
-    audio: { suppressLocalAudioPlayback: false },
-    systemAudio: "include",
+    audio: true,
   } as DisplayMediaStreamOptions);
 }
 
+const NO_AUDIO_ERROR = isMacOS()
+  ? `Geen audio ontvangen van de schermdeling.\n\n` +
+    `Op macOS werkt systeemgeluid alleen via een browsertab:\n` +
+    `• Sluit Teams of Meet in Chrome/Edge\n` +
+    `• Klik op Start, kies "Tab" in het deelvenster\n` +
+    `• Selecteer de juiste tab en vink "Tabblad-audio delen" aan\n\n` +
+    `Voor de desktop-app (Teams/Zoom) gebruik je de microfoonmodus of installeer je BlackHole.`
+  : `Geen audio ontvangen. Kies een scherm of venster en vink "Geluid delen" aan.`;
+
 /** Heuristiek: herkent labels van iPhones, Continuity-microfoons en typische telefoon-Bluetooth-namen. */
+function isMacOS(): boolean {
+  return typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || navigator.userAgent);
+}
+
 function isPhoneMic(label: string): boolean {
   const l = label.toLowerCase();
   return (
@@ -300,13 +312,13 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       } else {
         // Één aanroep — geen retry, want een tweede getDisplayMedia buiten het
         // click-event gooit "must be called from a user gesture handler".
-        const displayStream = await getDisplayMediaWithSystemAudio();
+        const displayStream = await getDisplayMediaWithAudio();
         displayStreamRef.current = displayStream;
 
         if (displayStream.getAudioTracks().length === 0) {
           displayStream.getTracks().forEach((t) => t.stop());
           displayStreamRef.current = null;
-          setError("Geen systeem-audio ontvangen. Kies een scherm of venster en vink 'Geluid delen' aan.");
+          setError(NO_AUDIO_ERROR);
           return;
         }
 
@@ -619,14 +631,18 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
                     label: "Hybride meeting",
                     icon: <Users className="h-5 w-5 shrink-0" />,
                     desc: "Microfoon + systeemaudio",
-                    detail: "Deelnemers op afstand én in de ruimte: microfoon plus laptop-geluid (Teams/Zoom).",
+                    detail: isMacOS()
+                      ? "Deel een browsertab (Teams/Meet in Chrome) en vink 'Tabblad-audio delen' aan."
+                      : "Deelnemers op afstand én in de ruimte: microfoon plus laptop-geluid (Teams/Zoom).",
                   },
                   {
                     mode: "online" as const,
                     label: "Online meeting",
                     icon: <Monitor className="h-5 w-5 shrink-0" />,
                     desc: "Jij + geluid van de call",
-                    detail: "Volledig online: microfoon voor jezelf, systeemaudio voor de rest. Vereist schermdeling met 'Geluid delen'.",
+                    detail: isMacOS()
+                      ? "Kies 'Tab' in het deelvenster en vink 'Tabblad-audio delen' aan. Werkt voor Teams/Meet in de browser."
+                      : "Volledig online: microfoon voor jezelf, systeemaudio voor de rest. Vereist schermdeling met 'Geluid delen'.",
                   },
                 ] as const
               ).map(({ mode, label, icon, desc, detail }) => (
