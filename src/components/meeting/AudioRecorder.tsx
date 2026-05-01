@@ -46,9 +46,15 @@ const NO_AUDIO_ERROR = isMacOS()
     `Voor de desktop-app (Teams/Zoom) gebruik je de microfoonmodus of installeer je BlackHole.`
   : `Geen audio ontvangen. Kies een scherm of venster en vink "Geluid delen" aan.`;
 
-/** Heuristiek: herkent labels van iPhones, Continuity-microfoons en typische telefoon-Bluetooth-namen. */
 function isMacOS(): boolean {
   return typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || navigator.userAgent);
+}
+
+/** Safari herkent aan aanwezigheid van "Safari" zonder "Chrome" of "Chromium" in de UA. */
+function isSafari(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /Safari/i.test(ua) && !/Chrome/i.test(ua) && !/Chromium/i.test(ua);
 }
 
 function isPhoneMic(label: string): boolean {
@@ -125,13 +131,12 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     animFrameRef.current = requestAnimationFrame(tick);
   };
 
-  const pickMimeType = useCallback(() =>
-    MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? "audio/webm;codecs=opus"
-      : MediaRecorder.isTypeSupported("audio/ogg")
-        ? "audio/ogg"
-        : "audio/webm",
-  []);
+  const pickMimeType = useCallback(() => {
+    if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) return "audio/webm;codecs=opus";
+    if (MediaRecorder.isTypeSupported("audio/ogg")) return "audio/ogg";
+    if (MediaRecorder.isTypeSupported("audio/mp4")) return "audio/mp4"; // Safari
+    return "audio/webm";
+  }, []);
   pickMimeTypeRef.current = pickMimeType;
 
   /**
@@ -622,6 +627,11 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
                 </button>
               </div>
             )}
+            {isSafari() && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Je gebruikt Safari. Online/hybride opname (systeemgeluid) wordt niet ondersteund in Safari — gebruik Chrome of Edge voor het opnemen van online meetings.
+              </p>
+            )}
             <p className="text-center text-sm font-medium text-gray-700">Hoe wil je opnemen?</p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {(
@@ -652,30 +662,37 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
                       : "Volledig online: microfoon voor jezelf, systeemaudio voor de rest. Vereist schermdeling met 'Geluid delen'.",
                   },
                 ] as const
-              ).map(({ mode, label, icon, desc, detail }) => (
+              ).map(({ mode, label, icon, desc, detail }) => {
+                const disabledInSafari = isSafari() && mode !== "physical";
+                return (
                 <button
                   key={mode}
                   type="button"
-                  onClick={() => setCaptureMode(mode)}
+                  disabled={disabledInSafari}
+                  onClick={() => !disabledInSafari && setCaptureMode(mode)}
+                  title={disabledInSafari ? "Niet beschikbaar in Safari — gebruik Chrome of Edge" : undefined}
                   className={cn(
                     "flex flex-col items-center gap-2 rounded-xl border-2 px-3 py-3 text-left transition-colors sm:text-center",
-                    captureMode === mode
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                      : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:bg-indigo-50/50"
+                    disabledInSafari
+                      ? "cursor-not-allowed border-gray-100 bg-gray-50 text-gray-300"
+                      : captureMode === mode
+                        ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                        : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:bg-indigo-50/50"
                   )}
                 >
                   <span className="flex items-center gap-2 sm:flex-col sm:gap-1.5">
                     {icon}
                     <span className="text-xs font-semibold leading-tight">{label}</span>
                   </span>
-                  <span className="text-[11px] text-gray-500 leading-snug">{desc}</span>
-                  {captureMode === mode && (
+                  <span className="text-[11px] leading-snug">{disabledInSafari ? "Niet in Safari" : desc}</span>
+                  {captureMode === mode && !disabledInSafari && (
                     <span className="w-full rounded-lg bg-white/80 px-2 py-2 text-left text-[11px] leading-relaxed text-gray-600 sm:text-center">
                       {detail}
                     </span>
                   )}
                 </button>
-              ))}
+                );
+              })}
             </div>
             {/* iPhone-koppeling — alleen bij fysieke meeting */}
             {captureMode === "physical" && (
