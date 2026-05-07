@@ -16,7 +16,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
 
   const meeting = await prisma.meeting.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id },
     include: {
       transcript: true,
       notes: true,
@@ -40,7 +40,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   const { id } = await params;
   const body = await req.json();
 
-  const meeting = await prisma.meeting.findFirst({ where: { id, userId: session.user.id } });
+  const meeting = await prisma.meeting.findFirst({ where: { id } });
   if (!meeting) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   let templateId = body.templateId;
@@ -157,7 +157,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const { id } = await params;
 
-  const meeting = await prisma.meeting.findFirst({ where: { id, userId: session.user.id } });
+  const meeting = await prisma.meeting.findFirst({ where: { id } });
   if (!meeting) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Verwijder Outlook-event als dat gekoppeld is (best-effort)

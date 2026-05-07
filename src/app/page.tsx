@@ -16,7 +16,7 @@ export default async function DashboardPage() {
 
   const [recentMeetingsRaw, scheduledMeetings, projects, stats] = await Promise.all([
     prisma.meeting.findMany({
-      where: { userId, status: { not: "scheduled" } },
+      where: { status: { not: "scheduled" } },
       include: {
         notes: { select: { summary: true } },
         participants: { select: { id: true, name: true } },
@@ -28,7 +28,7 @@ export default async function DashboardPage() {
       take: 6,
     }),
     prisma.meeting.findMany({
-      where: { userId, status: "scheduled" },
+      where: { status: "scheduled" },
       select: { id: true, title: true, scheduledAt: true, project: { select: { id: true, name: true, color: true } } },
       orderBy: { scheduledAt: "asc" },
     }),
@@ -38,8 +38,8 @@ export default async function DashboardPage() {
       orderBy: { createdAt: "desc" },
     }),
     Promise.all([
-      prisma.meeting.count({ where: { userId } }),
-      prisma.meeting.count({ where: { userId, status: "completed" } }),
+      prisma.meeting.count(),
+      prisma.meeting.count({ where: { status: "completed" } }),
       prisma.actionItem.count({
         where: {
           completed: false,

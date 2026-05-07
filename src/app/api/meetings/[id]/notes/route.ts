@@ -9,7 +9,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   const { id } = await params;
   const body = await req.json();
 
-  const meeting = await prisma.meeting.findFirst({ where: { id, userId: session.user.id } });
+  const meeting = await prisma.meeting.findFirst({ where: { id } });
   if (!meeting) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const notes = await prisma.notes.upsert({

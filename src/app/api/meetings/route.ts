@@ -29,7 +29,6 @@ export async function GET(req: Request) {
   const minimal = searchParams.get("minimal") === "true";
 
   const where = {
-    userId: session.user.id,
     ...(folderId ? { folderId } : {}),
     ...(projectId ? { projectId } : {}),
     ...(status ? { status } : {}),

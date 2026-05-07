@@ -12,7 +12,7 @@ export async function GET(
 
   const { id } = await params;
   const meeting = await prisma.meeting.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id },
     include: { notes: true },
   });
   if (!meeting) return NextResponse.json({ error: "Not found" }, { status: 404 });

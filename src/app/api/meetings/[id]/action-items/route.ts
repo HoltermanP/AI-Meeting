@@ -9,7 +9,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const body = await req.json();
 
-  const meeting = await prisma.meeting.findFirst({ where: { id, userId: session.user.id } });
+  const meeting = await prisma.meeting.findFirst({ where: { id } });
   if (!meeting) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const item = await prisma.actionItem.create({
@@ -33,15 +33,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   const { id } = await params;
   const body = await req.json();
 
-  const item = await prisma.actionItem.findFirst({
-    where: {
-      id: body.itemId,
-      OR: [
-        { meeting: { userId: session.user.id } },
-        { project: { userId: session.user.id } },
-      ],
-    },
-  });
+  const item = await prisma.actionItem.findUnique({ where: { id: body.itemId } });
   if (!item) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const data: {

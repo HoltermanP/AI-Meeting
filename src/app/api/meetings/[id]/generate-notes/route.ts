@@ -22,7 +22,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const { id } = await params;
 
     const meeting = await prisma.meeting.findFirst({
-      where: { id, userId: session.user.id },
+      where: { id },
       include: {
         transcript: true,
         notes: true,

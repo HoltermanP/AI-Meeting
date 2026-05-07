@@ -9,7 +9,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id: meetingId } = await params;
 
   const meeting = await prisma.meeting.findFirst({
-    where: { id: meetingId, userId: session.user.id },
+    where: { id: meetingId },
   });
   if (!meeting) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -47,7 +47,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const { participantId } = await req.json();
 
   const meeting = await prisma.meeting.findFirst({
-    where: { id: meetingId, userId: session.user.id },
+    where: { id: meetingId },
   });
   if (!meeting) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
