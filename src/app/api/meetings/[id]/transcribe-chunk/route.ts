@@ -4,13 +4,22 @@ import { prisma } from "@/lib/prisma";
 import { transcribeAudio, generateTitle } from "@/lib/openai";
 
 /**
- * Per-chunk Whisper-transcriptie. Elke chunk is een complete WebM van ~7-8 minuten
- * (≈ 1,5-2 MB op 32 kbps), dus past binnen de Vercel body-limit (4,5 MB) én binnen
- * Whisper's 25 MB limit. Geen Vercel Blob, geen ffmpeg, geen function timeout-issues.
+ * Per-chunk Whisper-transcriptie. Elke chunk is een complete WebM van ~3 minuten
+ * (≈ 0,7 MB op 32 kbps), dus past binnen de Vercel body-limit én Whisper's 25 MB limit.
  */
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 type Segment = { start: number; end: number; text: string };
+
+function parseProcessedIndices(raw: string | null | undefined): number[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((n) => typeof n === "number") : [];
+  } catch {
+    return [];
+  }
+}
 
 export async function POST(
   req: Request,
@@ -41,6 +50,7 @@ export async function POST(
   const totalStr = formData.get("total") as string | null;
   const offsetStr = formData.get("offsetSeconds") as string | null;
   const totalDurationStr = formData.get("totalDuration") as string | null;
+  const isLastStr = formData.get("isLast") as string | null;
   const mimeType = (formData.get("mimeType") as string) || "audio/webm";
 
   if (!audioBlob || !indexStr || !totalStr) {
@@ -53,35 +63,72 @@ export async function POST(
   const index = Number.parseInt(indexStr, 10);
   const total = Number.parseInt(totalStr, 10);
   const offsetSeconds = offsetStr ? Number.parseFloat(offsetStr) : 0;
-  const isLast = index === total - 1;
+  const isLastExplicit = isLastStr === "true";
+  const isLast = isLastExplicit || (total > 0 && index === total - 1);
 
   if (Number.isNaN(index) || Number.isNaN(total) || index < 0 || total <= 0) {
     return NextResponse.json({ error: "Ongeldige index/total" }, { status: 400 });
   }
 
   const t0 = Date.now();
-  console.log(`[chunk ${id}#${index + 1}/${total}] start, offset=${offsetSeconds}s`);
+  console.log(`[chunk ${id}#${index + 1}/${total}] start, offset=${offsetSeconds}s, isLast=${isLast}`);
 
   try {
+    const existingTranscript = await prisma.transcript.findUnique({
+      where: { meetingId: id },
+    });
+    const processed = parseProcessedIndices(existingTranscript?.processedChunkIndices);
+
+    if (processed.includes(index)) {
+      console.log(`[chunk ${id}#${index + 1}/${total}] al verwerkt — skip (idempotent)`);
+      if (isLast) {
+        const totalDuration = totalDurationStr ? Number.parseInt(totalDurationStr, 10) : null;
+        const updateData: { status: string; endedAt: Date; duration?: number } = {
+          status: "completed",
+          endedAt: new Date(),
+        };
+        if (totalDuration && !Number.isNaN(totalDuration)) {
+          updateData.duration = totalDuration;
+        }
+        await prisma.meeting.update({ where: { id }, data: updateData });
+      }
+      return NextResponse.json({
+        ok: true,
+        index,
+        total,
+        isLast,
+        skipped: true,
+        transcriptLength: existingTranscript?.content?.length ?? 0,
+      });
+    }
+
     const buffer = Buffer.from(await audioBlob.arrayBuffer());
     console.log(
       `[chunk ${id}#${index + 1}/${total}] ${Math.round(buffer.length / 1024)} KB ontvangen`
     );
 
-    if (index === 0) {
+    if (index === 0 && !existingTranscript) {
       await prisma.meeting.update({
         where: { id },
         data: { status: "processing" },
       });
-      await prisma.transcript.upsert({
-        where: { meetingId: id },
-        update: { content: "", segments: JSON.stringify([]), isProvisional: true },
-        create: {
+      await prisma.transcript.create({
+        data: {
           meetingId: id,
           content: "",
           segments: JSON.stringify([]),
           isProvisional: true,
+          processedChunkIndices: "[]",
         },
+      });
+    } else if (index === 0 && existingTranscript && processed.length === 0) {
+      await prisma.meeting.update({
+        where: { id },
+        data: { status: "processing" },
+      });
+      await prisma.transcript.update({
+        where: { meetingId: id },
+        data: { content: "", segments: JSON.stringify([]), isProvisional: true, processedChunkIndices: "[]" },
       });
     }
 
@@ -117,6 +164,7 @@ export async function POST(
       ? `${existingContent} ${cleanText}`
       : (cleanText || existingContent);
     const newSegments = [...existingSegments, ...adjustedSegments];
+    const newProcessed = [...parseProcessedIndices(current?.processedChunkIndices), index];
 
     await prisma.transcript.update({
       where: { meetingId: id },
@@ -124,6 +172,7 @@ export async function POST(
         content: newContent,
         segments: JSON.stringify(newSegments),
         isProvisional: !isLast,
+        processedChunkIndices: JSON.stringify(newProcessed),
       },
     });
 

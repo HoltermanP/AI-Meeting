@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import MainLayout from "@/components/layout/MainLayout";
 import AudioRecorder from "@/components/meeting/AudioRecorder";
+import PendingTranscriptionBanner from "@/components/meeting/PendingTranscriptionBanner";
 import NotesEditor from "@/components/meeting/NotesEditor";
 import ActionItemsList from "@/components/meeting/ActionItemsList";
 import ChatPanel from "@/components/meeting/ChatPanel";
@@ -529,6 +530,7 @@ const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).len
         <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden lg:flex-row">
           {/* Main content */}
           <div className="min-w-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
+            <PendingTranscriptionBanner meetingId={id} onSynced={loadMeeting} />
             {/* Agenda */}
             {agendaItems.length > 0 && meeting.status !== "completed" && (
               <div>

@@ -17,6 +17,6 @@ export type TranscriptSegment = {
   speaker?: string;
 };
 
-export type RecordingState = "idle" | "recording" | "paused" | "processing" | "done";
+export type RecordingState = "idle" | "recording" | "paused" | "processing" | "syncing" | "done";
 
 export type Platform = "zoom" | "google_meet" | "teams" | "slack" | "webex" | "other";

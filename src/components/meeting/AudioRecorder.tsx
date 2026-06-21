@@ -1,12 +1,19 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Mic, MicOff, Pause, Play, Square, Loader2, Monitor, Users, RefreshCw, ChevronDown, Smartphone, CheckCircle2 } from "lucide-react";
+import { Mic, MicOff, Pause, Play, Square, Loader2, Monitor, Users, RefreshCw, ChevronDown, Smartphone, CheckCircle2, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { formatDuration } from "@/lib/utils";
 import type { RecordingState } from "@/types";
 import { cn } from "@/lib/utils";
+import {
+  enqueueAndTrySync,
+  humanizeFetchError,
+  registerOnlineSyncListener,
+  syncMeetingChunks,
+} from "@/lib/transcription-sync";
+import { getPendingChunks, updateChunk } from "@/lib/transcription-queue";
 
 export type TranscribeResultMeta = {
   provisional?: boolean;
@@ -21,9 +28,9 @@ type Props = {
 };
 
 /** Hoe lang elke MediaRecorder-segment maximaal opneemt voordat-ie wordt geroteerd.
- *  7 min × 32 kbps ≈ 1,7 MB — past binnen Vercel's 4,5 MB body-limit én Whisper's 25 MB.
+ *  3 min × 32 kbps ≈ 0,7 MB — snellere Whisper-calls en betrouwbaardere uploads.
  */
-const SEGMENT_DURATION_SECONDS = 7 * 60;
+const SEGMENT_DURATION_SECONDS = 3 * 60;
 const CHUNK_INTERVAL_MS = 1000;
 
 /**
@@ -101,8 +108,43 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
   const currentSegmentStartRef = useRef(0);
   /** Timer die elke SEGMENT_DURATION_SECONDS de recorder roteert. */
   const rotateTimerRef = useRef<NodeJS.Timeout | null>(null);
+  /** Volgende chunk-index voor upload naar de server. */
+  const nextChunkIndexRef = useRef(0);
+  const [pendingOffline, setPendingOffline] = useState(0);
+
   /** True zolang we actief opnemen — rotatie mag alleen schedulen als dit true is. */
   const isRecordingRef = useRef(false);
+
+  const queueSegmentUpload = useCallback(
+    async (
+      blob: Blob,
+      index: number,
+      offsetSeconds: number,
+      isLast: boolean,
+      totalDuration: number,
+      estimatedTotal: number,
+    ) => {
+      await enqueueAndTrySync(
+        {
+          meetingId,
+          index,
+          total: estimatedTotal,
+          offsetSeconds,
+          totalDuration,
+          mimeType: blob.type || "audio/webm",
+          audioBlob: blob,
+          isLast,
+        },
+        {
+          onOffline: (n) => setPendingOffline(n),
+          onChunkSynced: () => {
+            onTranscribed("", "", { provisional: true });
+          },
+        },
+      );
+    },
+    [meetingId, onTranscribed],
+  );
 
   const clearRotateTimer = useCallback(() => {
     if (rotateTimerRef.current) {
@@ -283,6 +325,16 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
         blob,
         offsetSeconds: currentSegmentStartRef.current,
       });
+      const index = nextChunkIndexRef.current;
+      nextChunkIndexRef.current += 1;
+      void queueSegmentUpload(
+        blob,
+        index,
+        currentSegmentStartRef.current,
+        false,
+        currentDurationSec,
+        index + 1,
+      );
     }
     if (!isRecordingRef.current) return;
 
@@ -293,7 +345,7 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       const sec = Math.floor((Date.now() - startTimeRef.current) / 1000);
       void rotateRecorder(sec);
     }, SEGMENT_DURATION_SECONDS * 1000);
-  }, [finalizeCurrentRecorder, startNewRecorder]);
+  }, [finalizeCurrentRecorder, startNewRecorder, queueSegmentUpload]);
 
   const scheduleNextRotate = useCallback(() => {
     clearRotateTimer();
@@ -308,6 +360,8 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     activeModeRef.current = mode;
     recordedSegmentsRef.current = [];
     currentSegmentStartRef.current = 0;
+    nextChunkIndexRef.current = 0;
+    setPendingOffline(0);
 
     try {
       let recordStream: MediaStream;
@@ -412,44 +466,14 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
   }, [duration, scheduleNextRotate]);
 
   /**
-   * Upload één segment naar /transcribe-chunk. Gooit een fout bij niet-200.
+   * Stop opname: laatste segment in lokale wachtrij, synchroniseer alles naar de server.
    */
-  const uploadSegment = useCallback(
-    async (
-      blob: Blob,
-      index: number,
-      total: number,
-      offsetSeconds: number,
-      totalDuration: number,
-    ): Promise<void> => {
-      const formData = new FormData();
-      formData.append("audio", blob, `chunk-${index}.webm`);
-      formData.append("index", String(index));
-      formData.append("total", String(total));
-      formData.append("offsetSeconds", String(offsetSeconds));
-      formData.append("totalDuration", String(totalDuration));
-      formData.append("mimeType", blob.type || "audio/webm");
-
-      const res = await fetch(`/api/meetings/${meetingId}/transcribe-chunk`, {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(
-          (errData as { error?: string }).error ||
-            `Chunk ${index + 1}/${total} faalde (${res.status})`,
-        );
-      }
-    },
-    [meetingId],
-  );
-
   const stop = useCallback(async () => {
     if (!mediaRecorderRef.current && recordedSegmentsRef.current.length === 0) return;
 
     setState("processing");
     setProgress(0);
+    setError(null);
     isRecordingRef.current = false;
     if (timerRef.current) clearInterval(timerRef.current);
     clearRotateTimer();
@@ -467,8 +491,12 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
 
     stopAllStreams();
 
-    const segments = recordedSegmentsRef.current;
-    const total = segments.length;
+    const totalChunks = nextChunkIndexRef.current + (lastBlob && lastBlob.size > 0 ? 1 : 0);
+    if (totalChunks === 0 && recordedSegmentsRef.current.length === 0) {
+      setError("Geen audio opgenomen.");
+      setState("idle");
+      return;
+    }
 
     await fetch(`/api/meetings/${meetingId}`, {
       method: "PUT",
@@ -476,29 +504,47 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       body: JSON.stringify({ endedAt: new Date().toISOString(), duration: finalDuration }),
     }).catch(() => {});
 
-    if (total === 0) {
-      setError("Geen audio opgenomen.");
-      setState("idle");
-      return;
+    onTranscribed("", "", { provisional: true });
+
+    if (lastBlob && lastBlob.size > 0) {
+      const lastIndex = nextChunkIndexRef.current;
+      nextChunkIndexRef.current += 1;
+      await queueSegmentUpload(
+        lastBlob,
+        lastIndex,
+        currentSegmentStartRef.current,
+        true,
+        finalDuration,
+        totalChunks,
+      );
+    } else if (totalChunks > 0) {
+      const pending = await getPendingChunks(meetingId);
+      const lastPending = pending[pending.length - 1];
+      if (lastPending && !lastPending.isLast) {
+        await updateChunk(lastPending.id, { isLast: true, total: totalChunks, totalDuration: finalDuration });
+      }
     }
 
     try {
-      // Trigger meteen een eerste refresh zodat de UI uit "Voorlopig"-modus gaat
-      // en de polling-loop in de meetingpagina elke 4s verse transcript-data toont.
-      onTranscribed("", "", { provisional: true });
+      const synced = await syncMeetingChunks(meetingId, {
+        onProgress: ({ completed, total }) => {
+          setProgress(Math.round((completed / total) * 100));
+        },
+        onOffline: (n) => setPendingOffline(n),
+        onChunkSynced: () => onTranscribed("", "", { provisional: true }),
+      });
 
-      for (let i = 0; i < total; i++) {
-        const seg = segments[i];
-        await uploadSegment(seg.blob, i, total, seg.offsetSeconds, finalDuration);
-        setProgress(Math.round(((i + 1) / total) * 100));
+      if (synced) {
+        setProgress(100);
+        setState("done");
+        onTranscribed("", "", { provisional: false });
+      } else {
+        setState("syncing");
+        setError(null);
       }
-      setProgress(100);
-      setState("done");
-      onTranscribed("", "", { provisional: false });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Transcriptie mislukt";
-      setError(msg);
-      setState("idle");
+      setError(humanizeFetchError(err));
+      setState("syncing");
     }
   }, [
     meetingId,
@@ -507,8 +553,26 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     stopAllStreams,
     clearRotateTimer,
     finalizeCurrentRecorder,
-    uploadSegment,
+    queueSegmentUpload,
   ]);
+
+  useEffect(() => {
+    const unregister = registerOnlineSyncListener((id) => {
+      if (id !== meetingId) return;
+      void syncMeetingChunks(meetingId, {
+        onProgress: ({ completed, total }) => {
+          setProgress(Math.round((completed / total) * 100));
+        },
+        onComplete: () => {
+          setState("done");
+          setPendingOffline(0);
+          onTranscribed("", "", { provisional: false });
+        },
+        onOffline: (n) => setPendingOffline(n),
+      });
+    });
+    return unregister;
+  }, [meetingId, onTranscribed]);
 
   useEffect(() => {
     return () => {
@@ -526,9 +590,25 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
         <div className="text-center">
           <p className="font-medium text-indigo-700">Audio transcriberen…</p>
           <p className="text-sm text-indigo-500 mt-1">
-            {recordedSegmentsRef.current.length > 1
-              ? `Whisper verwerkt ${recordedSegmentsRef.current.length} segmenten één voor één.`
-              : "Whisper verwerkt de opname."}
+            Segmenten worden lokaal opgeslagen en naar de server gesynchroniseerd.
+          </p>
+        </div>
+        <Progress value={progress} className="w-full max-w-xs" />
+      </div>
+    );
+  }
+
+  if (state === "syncing") {
+    return (
+      <div className="flex flex-col items-center gap-4 rounded-xl border border-amber-200 bg-amber-50 p-8">
+        <WifiOff className="h-8 w-8 text-amber-700" />
+        <div className="text-center">
+          <p className="font-medium text-amber-900">Wacht op internetverbinding</p>
+          <p className="text-sm text-amber-800 mt-1 max-w-md">
+            {pendingOffline > 0
+              ? `${pendingOffline} audiosegment${pendingOffline === 1 ? "" : "en"} lokaal opgeslagen.`
+              : "Audio lokaal opgeslagen."}{" "}
+            Upload hervat automatisch zodra je weer online bent — laat dit tabblad open.
           </p>
         </div>
         <Progress value={progress} className="w-full max-w-xs" />
