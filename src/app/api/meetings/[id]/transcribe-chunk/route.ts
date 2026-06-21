@@ -7,7 +7,7 @@ import { transcribeAudio, generateTitle } from "@/lib/openai";
  * Per-chunk Whisper-transcriptie. Elke chunk is een complete WebM van ~3 minuten
  * (≈ 0,7 MB op 32 kbps), dus past binnen de Vercel body-limit én Whisper's 25 MB limit.
  */
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 type Segment = { start: number; end: number; text: string };
 
@@ -19,6 +19,31 @@ function parseProcessedIndices(raw: string | null | undefined): number[] {
   } catch {
     return [];
   }
+}
+
+async function ensureTranscriptRow(meetingId: string, reset: boolean) {
+  await prisma.meeting.update({
+    where: { id: meetingId },
+    data: { status: "processing" },
+  });
+  await prisma.transcript.upsert({
+    where: { meetingId },
+    create: {
+      meetingId,
+      content: "",
+      segments: JSON.stringify([]),
+      isProvisional: true,
+      processedChunkIndices: "[]",
+    },
+    update: reset
+      ? {
+          content: "",
+          segments: JSON.stringify([]),
+          isProvisional: true,
+          processedChunkIndices: "[]",
+        }
+      : {},
+  });
 }
 
 export async function POST(
@@ -73,7 +98,7 @@ export async function POST(
   console.log(`[chunk ${id}#${index + 1}/${total}] start, offset=${offsetSeconds}s, isLast=${isLast}`);
 
   try {
-    const existingTranscript = await prisma.transcript.findUnique({
+    let existingTranscript = await prisma.transcript.findUnique({
       where: { meetingId: id },
     });
     const processed = parseProcessedIndices(existingTranscript?.processedChunkIndices);
@@ -106,29 +131,15 @@ export async function POST(
       `[chunk ${id}#${index + 1}/${total}] ${Math.round(buffer.length / 1024)} KB ontvangen`
     );
 
-    if (index === 0 && !existingTranscript) {
-      await prisma.meeting.update({
-        where: { id },
-        data: { status: "processing" },
-      });
-      await prisma.transcript.create({
-        data: {
-          meetingId: id,
-          content: "",
-          segments: JSON.stringify([]),
-          isProvisional: true,
-          processedChunkIndices: "[]",
-        },
-      });
-    } else if (index === 0 && existingTranscript && processed.length === 0) {
-      await prisma.meeting.update({
-        where: { id },
-        data: { status: "processing" },
-      });
-      await prisma.transcript.update({
-        where: { meetingId: id },
-        data: { content: "", segments: JSON.stringify([]), isProvisional: true, processedChunkIndices: "[]" },
-      });
+    if (buffer.length < 100) {
+      return NextResponse.json({ error: "Audiosegment te klein of leeg" }, { status: 400 });
+    }
+
+    if (index === 0) {
+      await ensureTranscriptRow(id, processed.length === 0 && Boolean(existingTranscript));
+    } else if (!existingTranscript) {
+      await ensureTranscriptRow(id, false);
+      existingTranscript = await prisma.transcript.findUnique({ where: { meetingId: id } });
     }
 
     const wStart = Date.now();
@@ -214,17 +225,28 @@ export async function POST(
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[chunk ${id}#${index + 1}/${total}] FAIL na ${Date.now() - t0}ms:`, msg);
 
-    await prisma.transcript.updateMany({
-      where: { meetingId: id },
-      data: {
-        content: `⚠️ Transcriptie mislukt op chunk ${index + 1}/${total}: ${msg}`,
-        isProvisional: false,
-      },
-    });
-    await prisma.meeting.updateMany({
-      where: { id },
-      data: { status: "completed" },
-    });
+    try {
+      await prisma.transcript.upsert({
+        where: { meetingId: id },
+        create: {
+          meetingId: id,
+          content: `⚠️ Transcriptie mislukt op chunk ${index + 1}/${total}: ${msg}`,
+          segments: JSON.stringify([]),
+          isProvisional: false,
+          processedChunkIndices: "[]",
+        },
+        update: {
+          content: `⚠️ Transcriptie mislukt op chunk ${index + 1}/${total}: ${msg}`,
+          isProvisional: false,
+        },
+      });
+      await prisma.meeting.updateMany({
+        where: { id },
+        data: { status: "completed" },
+      });
+    } catch (dbErr) {
+      console.error(`[chunk ${id}] kon fout niet opslaan in DB:`, dbErr);
+    }
 
     return NextResponse.json({ error: msg }, { status: 500 });
   }

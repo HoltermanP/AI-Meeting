@@ -19,6 +19,8 @@ export type AudioCaptureMode = "physical" | "online" | "hybrid";
 type Props = {
   meetingId: string;
   onTranscribed: (transcript: string, title: string, meta?: TranscribeResultMeta) => void;
+  onTranscribingChange?: (active: boolean) => void;
+  onTranscriptRefresh?: () => void | Promise<void>;
 };
 
 /** Hoe lang elke MediaRecorder-segment maximaal opneemt voordat-ie wordt geroteerd.
@@ -71,7 +73,12 @@ function isPhoneMic(label: string): boolean {
 }
 
 
-export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
+export default function AudioRecorder({
+  meetingId,
+  onTranscribed,
+  onTranscribingChange,
+  onTranscriptRefresh,
+}: Props) {
   const [captureMode, setCaptureMode] = useState<AudioCaptureMode | null>(null);
   const [state, setState] = useState<RecordingState>("idle");
   const [duration, setDuration] = useState(0);
@@ -450,6 +457,7 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
       body: JSON.stringify({ endedAt: new Date().toISOString(), duration: finalDuration }),
     }).catch(() => {});
 
+    onTranscribingChange?.(true);
     onTranscribed("", "", { provisional: true });
 
     try {
@@ -466,12 +474,14 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
           isLast: i === total - 1,
         });
         setProgress(Math.round(((i + 1) / total) * 100));
-        onTranscribed("", "", { provisional: true });
+        await onTranscriptRefresh?.();
       }
       setProgress(100);
       setState("done");
+      onTranscribingChange?.(false);
       onTranscribed("", "", { provisional: false });
     } catch (err: unknown) {
+      onTranscribingChange?.(false);
       setError(humanizeFetchError(err));
       setState("idle");
     }
@@ -479,6 +489,8 @@ export default function AudioRecorder({ meetingId, onTranscribed }: Props) {
     meetingId,
     duration,
     onTranscribed,
+    onTranscribingChange,
+    onTranscriptRefresh,
     stopAllStreams,
     clearRotateTimer,
     finalizeCurrentRecorder,

@@ -45,6 +45,13 @@ export default function MeetingDetailPage() {
   const pdfSourceRef = useRef<HTMLDivElement>(null);
   const emptyActionItems = useMemo(() => [], []);
   const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
+  const [transcribingActive, setTranscribingActive] = useState(false);
+  const transcribingRef = useRef(false);
+
+  const setTranscribing = useCallback((active: boolean) => {
+    transcribingRef.current = active;
+    setTranscribingActive(active);
+  }, []);
 
   useEffect(() => {
     loadMeeting();
@@ -297,11 +304,41 @@ export default function MeetingDetailPage() {
     else await exportPdf();
   }
 
+  const refreshMeeting = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/meetings/${id}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setMeeting((prev: any) => {
+        const transcribing = transcribingRef.current;
+        const mergedTranscript =
+          data.transcript ??
+          (transcribing
+            ? {
+                ...(prev?.transcript || {}),
+                content: prev?.transcript?.content ?? "",
+                isProvisional: true,
+              }
+            : prev?.transcript);
+
+        return {
+          ...prev,
+          ...data,
+          status:
+            transcribing && data.status !== "completed" ? "processing" : data.status,
+          transcript: mergedTranscript,
+          participants: data.participants ?? prev?.participants,
+          actionItems: data.actionItems ?? prev?.actionItems,
+        };
+      });
+      if (data.title) setTitle(data.title);
+    } catch {
+      /* volgende poll/refresh probeert opnieuw */
+    }
+  }, [id]);
+
   const onTranscribed = useCallback(
     async (_transcript: string, newTitle: string, meta?: { provisional?: boolean }) => {
-      // Eerste call (provisional=true): lokaal isProvisional aanzetten zodat de
-      // polling-loop hieronder begint te pollen — dan groeit de transcriptie
-      // per chunk vanzelf in de UI.
       if (meta?.provisional) {
         setMeeting((m: any) => ({
           ...(m || {}),
@@ -312,50 +349,26 @@ export default function MeetingDetailPage() {
             isProvisional: true,
           },
         }));
+        void refreshMeeting();
         return;
       }
-      // Finale call (provisional=false): haal definitieve data op uit DB
-      try {
-        const res = await fetch(`/api/meetings/${id}`);
-        if (res.ok) {
-          const data = await res.json();
-          setMeeting(data);
-          if (data.title) setTitle(data.title);
-          return;
-        }
-      } catch {
-        /* fallback hieronder */
-      }
-      setMeeting((m: any) => ({
-        ...m,
-        status: "completed",
-        title: newTitle || m.title,
-        transcript: {
-          ...m.transcript,
-          isProvisional: false,
-        },
-      }));
+      await refreshMeeting();
       if (newTitle) setTitle(newTitle);
     },
-    [id]
+    [refreshMeeting]
   );
 
   useEffect(() => {
     const shouldPoll =
-      meeting?.status === "processing" || Boolean(meeting?.transcript?.isProvisional);
+      transcribingActive ||
+      meeting?.status === "processing" ||
+      Boolean(meeting?.transcript?.isProvisional);
     if (!shouldPoll || !id) return;
-    const t = setInterval(() => {
-      fetch(`/api/meetings/${id}`)
-        .then((r) => r.json())
-        .then((data) => {
-          if (!data) return;
-          setMeeting(data);
-          if (data.title) setTitle(data.title);
-        })
-        .catch(() => {});
-    }, 2000);
+
+    void refreshMeeting();
+    const t = setInterval(() => void refreshMeeting(), 2000);
     return () => clearInterval(t);
-  }, [meeting?.status, meeting?.transcript?.isProvisional, id]);
+  }, [transcribingActive, meeting?.status, meeting?.transcript?.isProvisional, id, refreshMeeting]);
 
   if (loading) {
     return (
@@ -370,6 +383,40 @@ export default function MeetingDetailPage() {
 const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).length || 0;
 
   const notesHtml = meeting?.notes?.content ? notesToHtml(meeting.notes.content) : "";
+  const showTranscript =
+    transcribingActive || meeting.status === "processing" || Boolean(meeting.transcript);
+
+  const transcriptBlock = showTranscript ? (
+    <div>
+      <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+        <FileText className="h-4 w-4" /> Transcript
+      </h2>
+      <TranscriptView
+        content={
+          typeof meeting.transcript?.content === "string"
+            ? meeting.transcript.content
+            : meeting.transcript?.content
+              ? JSON.stringify(meeting.transcript.content)
+              : ""
+        }
+        segments={(() => {
+          const raw = meeting.transcript?.segments;
+          if (!raw) return [];
+          if (Array.isArray(raw)) return raw;
+          if (typeof raw === "string") {
+            try {
+              const parsed = JSON.parse(raw);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          }
+          return [];
+        })()}
+        isProvisional={Boolean(meeting.transcript?.isProvisional) || transcribingActive}
+      />
+    </div>
+  ) : null;
 
   return (
     <MainLayout>
@@ -558,6 +605,9 @@ const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).len
               />
             </div>
 
+            {/* Transcript bovenaan tijdens verwerking zodat het live zichtbaar is */}
+            {(transcribingActive || meeting.status === "processing") && transcriptBlock}
+
             {/* Recording */}
             {meeting.status !== "completed" && (
               <div>
@@ -567,42 +617,14 @@ const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).len
                 <AudioRecorder
                   meetingId={id}
                   onTranscribed={onTranscribed}
+                  onTranscribingChange={setTranscribing}
+                  onTranscriptRefresh={refreshMeeting}
                 />
               </div>
             )}
 
-            {/* Transcript — live tijdens verwerking, definitief na afronding */}
-            {(meeting.status === "processing" || meeting.transcript) && (
-              <div>
-                <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                  <FileText className="h-4 w-4" /> Transcript
-                </h2>
-                <TranscriptView
-                  content={
-                    typeof meeting.transcript?.content === "string"
-                      ? meeting.transcript.content
-                      : meeting.transcript?.content
-                        ? JSON.stringify(meeting.transcript.content)
-                        : ""
-                  }
-                  segments={(() => {
-                    const raw = meeting.transcript?.segments;
-                    if (!raw) return [];
-                    if (Array.isArray(raw)) return raw;
-                    if (typeof raw === "string") {
-                      try {
-                        const parsed = JSON.parse(raw);
-                        return Array.isArray(parsed) ? parsed : [];
-                      } catch {
-                        return [];
-                      }
-                    }
-                    return [];
-                  })()}
-                  isProvisional={Boolean(meeting.transcript?.isProvisional)}
-                />
-              </div>
-            )}
+            {/* Transcript na afronding */}
+            {!(transcribingActive || meeting.status === "processing") && transcriptBlock}
 
             {/* Template vóór genereren */}
             {meeting.transcript && (
