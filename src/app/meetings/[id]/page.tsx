@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import MainLayout from "@/components/layout/MainLayout";
 import AudioRecorder from "@/components/meeting/AudioRecorder";
-import PendingTranscriptionBanner from "@/components/meeting/PendingTranscriptionBanner";
 import NotesEditor from "@/components/meeting/NotesEditor";
 import ActionItemsList from "@/components/meeting/ActionItemsList";
 import ChatPanel from "@/components/meeting/ChatPanel";
@@ -307,7 +306,11 @@ export default function MeetingDetailPage() {
         setMeeting((m: any) => ({
           ...(m || {}),
           status: "processing",
-          transcript: { ...(m?.transcript || {}), isProvisional: true },
+          transcript: {
+            ...(m?.transcript || {}),
+            content: m?.transcript?.content ?? "",
+            isProvisional: true,
+          },
         }));
         return;
       }
@@ -338,24 +341,21 @@ export default function MeetingDetailPage() {
   );
 
   useEffect(() => {
-    const prov = meeting?.transcript?.isProvisional;
-    if (!prov || !id) return;
+    const shouldPoll =
+      meeting?.status === "processing" || Boolean(meeting?.transcript?.isProvisional);
+    if (!shouldPoll || !id) return;
     const t = setInterval(() => {
       fetch(`/api/meetings/${id}`)
         .then((r) => r.json())
         .then((data) => {
           if (!data) return;
-          // Tijdens chunk-uploads: refresh de meeting state zodat de UI de
-          // groeiende transcript-content live laat zien. Bij definitieve klaar
-          // (isProvisional=false) ook setMeeting — de polling stopt vanzelf
-          // omdat dit useEffect dan opnieuw evalueert met prov=false.
           setMeeting(data);
           if (data.title) setTitle(data.title);
         })
         .catch(() => {});
-    }, 4000);
+    }, 2000);
     return () => clearInterval(t);
-  }, [meeting?.transcript?.isProvisional, id]);
+  }, [meeting?.status, meeting?.transcript?.isProvisional, id]);
 
   if (loading) {
     return (
@@ -530,7 +530,6 @@ const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).len
         <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden lg:flex-row">
           {/* Main content */}
           <div className="min-w-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
-            <PendingTranscriptionBanner meetingId={id} onSynced={loadMeeting} />
             {/* Agenda */}
             {agendaItems.length > 0 && meeting.status !== "completed" && (
               <div>
@@ -572,8 +571,8 @@ const pendingActions = meeting.actionItems?.filter((i: any) => !i.completed).len
               </div>
             )}
 
-            {/* Transcript — getoond zodra beschikbaar, "Voorlopig" zolang Whisper nog bezig is */}
-            {meeting.transcript && (
+            {/* Transcript — live tijdens verwerking, definitief na afronding */}
+            {(meeting.status === "processing" || meeting.transcript) && (
               <div>
                 <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                   <FileText className="h-4 w-4" /> Transcript

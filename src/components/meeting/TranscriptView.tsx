@@ -91,7 +91,7 @@ export default function TranscriptView({ content, segments = [], isProvisional }
 
       {isProvisional && !isFailed && !collapsed && (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          Whisper verwerkt de opname op de achtergrond. De pagina ververst automatisch zodra het transcript klaar is.
+          Whisper verwerkt de opname. Het transcript wordt hieronder live bijgewerkt.
         </p>
       )}
 

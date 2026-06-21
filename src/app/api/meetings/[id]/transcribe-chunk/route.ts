@@ -63,8 +63,7 @@ export async function POST(
   const index = Number.parseInt(indexStr, 10);
   const total = Number.parseInt(totalStr, 10);
   const offsetSeconds = offsetStr ? Number.parseFloat(offsetStr) : 0;
-  const isLastExplicit = isLastStr === "true";
-  const isLast = isLastExplicit || (total > 0 && index === total - 1);
+  const isLast = isLastStr === "true";
 
   if (Number.isNaN(index) || Number.isNaN(total) || index < 0 || total <= 0) {
     return NextResponse.json({ error: "Ongeldige index/total" }, { status: 400 });
